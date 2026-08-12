@@ -85,15 +85,13 @@ void POM::construction()
 
 G4UnionSolid *POM::pressureVessel(const G4double pOutRad, G4String pSuffix)
 {
-    G4Ellipsoid *topSolid = new G4Ellipsoid("SphereTop solid" + pSuffix, pOutRad, pOutRad, pOutRad, -5 * mm, pOutRad + 5 * mm);
-    G4Ellipsoid *bottomSolid = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -(pOutRad + 5 * mm), 5 * mm);
+    G4Tubs *cylinderSolid = new G4Tubs("Cylinder solid" + pSuffix, 0, pOutRad, m_cylinderHeight, 0, 2 * CLHEP::pi);
 
-    G4double zCorners[] = {m_cylinderHeight * 1.001, m_cylinderHeight, 0, -m_cylinderHeight, -m_cylinderHeight * 1.001};
-    G4double rCorners[] = {0, pOutRad, pOutRad + m_cylinderHeight * sin(m_cylinderAngle), pOutRad, 0};
-    G4Polycone *cylinderSolid = new G4Polycone("Cylinder solid" + pSuffix, 0, 2 * CLHEP::pi, 5, rCorners, zCorners);
+    G4Ellipsoid *topHalfSphere = new G4Ellipsoid("SphereTop solid" + pSuffix, pOutRad, pOutRad, pOutRad, 0, pOutRad);
+    G4Ellipsoid *bottomHalfSphere = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -pOutRad, 0);
 
-    G4UnionSolid *temporalUnion = new G4UnionSolid("temp" + pSuffix, cylinderSolid, topSolid, 0, G4ThreeVector(0, 0, m_cylinderHeight));
-    G4UnionSolid *unionSolid = new G4UnionSolid("OM body" + pSuffix, temporalUnion, bottomSolid, 0, G4ThreeVector(0, 0, -m_cylinderHeight));
+    G4UnionSolid *topUnion = new G4UnionSolid("temp" + pSuffix, cylinderSolid, topHalfSphere, 0, G4ThreeVector(0, 0, 0));
+    G4UnionSolid *unionSolid = new G4UnionSolid("OM body" + pSuffix, topUnion, bottomHalfSphere, 0, G4ThreeVector(0, 0, 0));
     return unionSolid;
 }
 
