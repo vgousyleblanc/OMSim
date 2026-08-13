@@ -90,8 +90,9 @@ G4UnionSolid *POM::pressureVessel(const G4double pOutRad, G4String pSuffix)
     G4Ellipsoid *topHalfSphere = new G4Ellipsoid("SphereTop solid" + pSuffix, pOutRad, pOutRad, pOutRad, 0, pOutRad);
     G4Ellipsoid *bottomHalfSphere = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -pOutRad, 0);
 
-    G4UnionSolid *topUnion = new G4UnionSolid("temp" + pSuffix, cylinderSolid, topHalfSphere, 0, G4ThreeVector(0, 0, 0));
-    G4UnionSolid *unionSolid = new G4UnionSolid("OM body" + pSuffix, topUnion, bottomHalfSphere, 0, G4ThreeVector(0, 0, 0));
+    // place hemispheres at the cylinder ends so they start where the cylinder ends
+    G4UnionSolid *topUnion = new G4UnionSolid("temp" + pSuffix, cylinderSolid, topHalfSphere, 0, G4ThreeVector(0, 0, m_cylinderHeight));
+    G4UnionSolid *unionSolid = new G4UnionSolid("OM body" + pSuffix, topUnion, bottomHalfSphere, 0, G4ThreeVector(0, 0, -m_cylinderHeight));
     return unionSolid;
 }
 
@@ -122,17 +123,28 @@ G4SubtractionSolid *POM::substractHarnessPCA(G4VSolid *p_solid)
 void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
 {
     G4RotationMatrix lRotationInternal;
+    G4RotationMatrix lRotation_frame_up;
+    G4RotationMatrix lRotation_frame_down;
+    lRotation_frame_up.rotateZ(90*deg);
+    lRotation_frame_up.rotateY(90*deg);
+    lRotation_frame_down.rotateZ(90*deg);
+    lRotation_frame_down.rotateY(-90*deg);
     G4ThreeVector lOriginInternal(0 * mm, 0 * mm, 0 * mm);
-
+    G4ThreeVector lOriginInternal_up(0 * mm,m_cylinderHeight, 0 * mm);
+    G4ThreeVector lOriginInternal_down(0 * mm,m_cylinderHeight, 0 * mm);
     //Support structure
-    Tools::AppendCADComponent(this, 1.0, lOriginInternal, lRotationInternal, "POM/SupportStructure_250213.obj", "CAD_SupportStructure", m_data->getMaterial("NoOptic_Stahl"), m_steelVis, m_data->getOpticalSurface("Surf_StainlessSteelGround"));
-    {
-    auto comp = getComponent("CAD_SupportStructure");
-    new G4PVPlacement(G4Transform3D(lRotationInternal, G4ThreeVector()),
-        comp.VLogical, "CAD_SupportStructure_physical", p_innerVolume, false, 0, m_checkOverlaps);
-    deleteComponent("CAD_SupportStructure");
-    }
-
+    //Tools::AppendCADComponent(this, 1.0, lOriginInternal, lRotationInternal, "POM/SupportStructure_250213.obj", "CAD_SupportStructure", m_data->getMaterial("NoOptic_Stahl"), m_steelVis, m_data->getOpticalSurface("Surf_StainlessSteelGround"));
+    //{
+    //auto comp = getComponent("CAD_SupportStructure");
+    //new G4PVPlacement(G4Transform3D(lRotationInternal, G4ThreeVector()),
+    //    comp.VLogical, "CAD_SupportStructure_physical", p_innerVolume, false, 0, m_checkOverlaps);
+    //deleteComponent("CAD_SupportStructure");
+    //}
+    //log_info("Adding glass hemisphere and frame!");
+    //Tools::AppendCADComponent(this, 1.0, lOriginInternal, lRotationInternal, "POM/GlasHemisphere.obj", "CAD_Glass", m_data->getMaterial("RiAbs_Glass_Vitrovex"), m_boardVis);
+    log_info("Adding frame!");
+    Tools::AppendCADComponent(this, 1.0, lOriginInternal_up, lRotation_frame_up, "POM/PMTFrame.obj", "CAD_Frame_up",m_data->getMaterial("NoOptic_Absorber"), m_boardVis);
+    Tools::AppendCADComponent(this, 1.0, lOriginInternal_down, lRotation_frame_down, "POM/PMTFrame.obj", "CAD_Frame_down",m_data->getMaterial("NoOptic_Absorber"), m_boardVis);
     //Electronics
     log_info("Simplified LOM electronics are defined as absorber!");
     Tools::AppendCADComponent(this, 1.0, lOriginInternal, lRotationInternal, "POM/Electronics_250213.obj", "CAD_Electronics", m_data->getMaterial("NoOptic_Absorber"), m_boardVis);
