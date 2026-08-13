@@ -64,11 +64,11 @@ private:
     const G4double m_xInternalCAD = 68.248*mm;
     const G4double m_yInternalCAD = 0*mm;
     const G4double m_zInternalCAD = -124.218*mm;
-    const G4double m_gelPadDZ = 30.0*mm;
-    const G4double m_glassOutRad = 153.2*mm;
+    const G4double m_gelPadDZ = 24.0*mm; //old 30, gelpad thickness 24
+    const G4double m_glassOutRad = 214.0*mm; // Outer vessel radius including 12 mm glass thickness
     const G4double m_glassThick = 12.0*mm;
-    const G4double m_glassInRad = m_glassOutRad - m_glassThick;
-    const G4double m_cylinderHeight = 68.8*mm;
+    const G4double m_glassInRad = 202.0*mm;   // Inner air cavity radius, 202
+    const G4double m_cylinderHeight = 80.0*mm;
     const G4double m_cylinderAngle = 2.5*deg;
     const G4double m_gelThicknessFrontPMT = 3.6*mm;
     const G4double m_gelThickness = 4.5*mm;
@@ -83,7 +83,7 @@ private:
     const G4int m_numberEqPMTs = 4;
     const G4double m_polarEquatorialPMTphiPhase = 45.0*deg;
     const G4double m_equatorialTiltAngle = 15.0*deg;
-    const G4double m_polarPadOpeningAngle = 30.0*deg;
+    const G4double m_polarPadOpeningAngle = 50.0*deg;//30
     const G4double m_equatorialPadOpeningAngle = 22.0*deg;
     const G4int m_totalNumberPMTs = (m_numberPolarPMTs + m_numberEqPMTs) * 2;
 

@@ -8,6 +8,7 @@
 #include "OMSimCommandArgsTable.hh"
 
 #include <G4Cons.hh>
+#include "G4Sphere.hh"
 #include <G4Ellipsoid.hh>
 #include <G4IntersectionSolid.hh>
 #include <G4Polycone.hh>
@@ -219,9 +220,15 @@ void POM::setPMTAndGelpadPositions()
             zGelPad = zPMT - 2 * m_gelPadDZ * sin(90 * deg - (180 * deg - thetaPMT));
         }
 
-        // PMTs
-        xPMT = (rhoPMT * mm) * sin(thetaPMT) * cos(phiPMT);
-        yPMT = (rhoPMT * mm) * sin(thetaPMT) * sin(phiPMT);
+        // PMTs (rhoPMT already includes units)
+        xPMT = rhoPMT * sin(thetaPMT) * cos(phiPMT);
+        yPMT = rhoPMT * sin(thetaPMT) * sin(phiPMT);
+        if (zPMT > 0) {
+            zPMT += m_cylinderHeight;
+            zGelPad += m_cylinderHeight;} 
+        else {
+            zPMT -= m_cylinderHeight;
+            zGelPad -= m_cylinderHeight;}
 
         // Gelpads
         xGelPad = rhoGelpad * sin(thetaPMT) * cos(phiPMT);
@@ -235,6 +242,18 @@ void POM::setPMTAndGelpadPositions()
         m_thetaPMT.push_back(thetaPMT);
         m_phiPMT.push_back(phiPMT);
     }
+
+    // Adjust PMT centers so the PMT tip (center +/- m_PMToffset along radial direction)
+    // meets the gelpad surface. For each PMT, move its center to: gelpad_pos - unit*(m_PMToffset)
+    /*for (size_t k = 0; k < m_positionsPMT.size(); ++k)
+    {
+        G4ThreeVector vec = m_positionsGelpad[k] - m_positionsPMT[k];
+        if (vec.mag() > 0) {
+            G4ThreeVector unit = vec.unit();
+            m_positionsPMT[k] = m_positionsGelpad[k] - unit * m_PMToffset;
+        }
+    }
+        */
 }
 
 // Todo
@@ -256,7 +275,7 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
     // Definition of semiaxes in (elliptical section) cone for titled gel pads
     G4double dx = std::cos(m_equatorialTiltAngle) / (2 * (1 + std::sin(m_equatorialTiltAngle) * std::tan(m_equatorialPadOpeningAngle))) * m_maxPMTRadius * 2; // semiaxis y at -ztop
     G4double ztop = 2 * m_gelPadDZ;
-    G4double dy = m_maxPMTRadius;                                // semiaxis x at -ztop
+    G4double dy = m_maxPMTRadius;   //PMT dependant
     G4double Dy = dy + 2 * ztop * std::tan(m_equatorialPadOpeningAngle); // semiaxis x at +ztop
     G4double Dx = dx * Dy / dy;                                 //     Dx/dx=Dy/dy always ;  //semiaxis y at -ztop
     G4double xsemiaxis = (Dx - dx) / (2 * ztop);                // Best way it can be defined
@@ -278,11 +297,73 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
         m_converter << "GelPad_" << k << "_solid";
         m_converter2 << "Gelpad_final" << k << "_logical";
 
-        // polar gel pads
+        // polar gel pads: cone + overflow tube intersected with inner glass sphere to create spherical top
         if (k <= m_numberPolarPMTs - 1 or k >= m_totalNumberPMTs - m_numberPolarPMTs)
         {
-            gelPadBasicSolid = new G4Cons("GelPadBasic", 0, m_maxPMTRadius, 0, m_maxPMTRadius + 4 * m_gelPadDZ * tan(m_polarPadOpeningAngle), 2 * m_gelPadDZ, 0, 2 * CLHEP::pi);
+            // parameters
+            G4double gelpad_opening_angle = m_polarPadOpeningAngle; // use polar opening angle,50
+            G4double gelpad_small_radius = m_maxPMTRadius; // base radius near PMT, 41
+            G4double gelpad_thickness = m_gelPadDZ; // full thickness in Z,24
+            G4double gelpad_large_radius = gelpad_small_radius + std::tan(gelpad_opening_angle) * gelpad_thickness;
 
+            // overflow tube parameters
+            G4double gelpad_overflow_max_radius = 250.0 * mm;
+            G4double gelpad_overflow_height = 50.0 * mm;
+            // place overflow so it slightly extends above cone
+            G4double gelpad_overflow_offset = gelpad_thickness / 2.0 - gelpad_overflow_height / 2.0;
+
+            // create cone
+            G4VSolid *gelpad_cone = new G4Cons(m_converter.str() + "_cone",
+                                               0 * mm,
+                                               gelpad_small_radius,
+                                               0 * mm,
+                                               gelpad_large_radius,
+                                               gelpad_thickness / 2.0,
+                                               0,
+                                               2 * CLHEP::pi);
+
+            // overflow tube
+            G4Tubs *gelpad_overflow_tubs = new G4Tubs(m_converter.str() + "_overflow",
+                                                      0,
+                                                      gelpad_overflow_max_radius,
+                                                      gelpad_overflow_height / 2.0,
+                                                      0,
+                                                      2 * CLHEP::pi);
+
+            // union cone + overflow
+            G4VSolid *gelpad_cone_and_tubs = new G4UnionSolid(m_converter.str() + "_cone_and_tubs",
+                                                              gelpad_cone,
+                                                              gelpad_overflow_tubs,
+                                                              nullptr,
+                                                              G4ThreeVector(0, 0, gelpad_overflow_offset));
+
+            // sphere to cut top to match inner glass curvature
+            // compute the sphere placement in gelpad-local coordinates so that
+            // after rotating and translating the gelpad into place the sphere
+            // center sits at the global origin (center of the inner glass).
+            G4double sphere_radius = m_glassInRad; // inner glass radius
+            G4RotationMatrix rotation_for_calc;
+            rotation_for_calc.rotateY(m_thetaPMT[k]);
+            rotation_for_calc.rotateZ(m_phiPMT[k]);
+            // compute the sphere center in gelpad-local coordinates so that
+            // R * local_center + placement = 0  => local_center = R^{-1} * (-placement)
+            G4ThreeVector local_center = rotation_for_calc.inverse() * ( - m_positionsGelpad[k] );
+
+            G4VSolid *gelpad_sphere_cut = new G4Sphere(m_converter.str() + "_sphere_cut",
+                                                       0,
+                                                       sphere_radius,
+                                                       0,
+                                                       2 * CLHEP::pi,
+                                                       0,
+                                                       CLHEP::pi);
+
+            // intersect cone+overflow with sphere to create spherical top
+            G4VSolid *gelpad_solid = new G4IntersectionSolid(m_converter.str() + "_gelpad",
+                                                              gelpad_cone_and_tubs,
+                                                              gelpad_sphere_cut,
+                                                              new G4RotationMatrix(),
+                                                              G4ThreeVector(0,0,0));
+            
             // rotation and position of gelpad
             G4RotationMatrix *rotation = new G4RotationMatrix();
             rotation->rotateY(m_thetaPMT[k]);
@@ -291,9 +372,10 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
             tra = new G4Transform3D(*rotation, G4ThreeVector(m_positionsGelpad[k]));
             G4Transform3D transformers = G4Transform3D(*rotation, G4ThreeVector(m_positionsPMT[k]));
 
-            // creating volumes ... basic cone, subtract PMT, logical volume of gelpad
-            cutCone = new G4IntersectionSolid(m_converter.str(), p_gelSolid, gelPadBasicSolid, *tra);
+            // subtract PMT solid to create final gelpad volume
+            cutCone = new G4IntersectionSolid(m_converter.str(), p_gelSolid, gelpad_solid, *tra);
             cutConeFinal = new G4SubtractionSolid(m_converter.str(), cutCone, solidPMT, transformers);
+            
             gelPadLogical = new G4LogicalVolume(cutConeFinal, m_data->getMaterial("RiAbs_Gel_Shin-Etsu"), m_converter2.str());
         };
 
