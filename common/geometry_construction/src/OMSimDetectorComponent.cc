@@ -7,6 +7,7 @@
 #include <G4PVPlacement.hh>
 #include <G4SystemOfUnits.hh>
 #include <G4Transform3D.hh>
+#include <G4TessellatedSolid.hh>
 
 
 
@@ -103,6 +104,9 @@ OMSimDetectorComponent::Component OMSimDetectorComponent::getComponent(G4String 
  */
 G4Transform3D OMSimDetectorComponent::getNewPosition(G4ThreeVector p_position, G4RotationMatrix p_rotation, G4ThreeVector pObjectPosition, G4RotationMatrix pObjectRotation)
 {
+    //G4RotationMatrix finalRot = p_rotation * pObjectRotation;
+    //G4ThreeVector finalPos = p_position + p_rotation * pObjectPosition;
+    //return G4Transform3D(finalRot, finalPos);
     return G4Transform3D(pObjectRotation.transform(p_rotation), p_position + pObjectPosition.transform(p_rotation));
 }
 
@@ -187,6 +191,10 @@ G4SubtractionSolid *OMSimDetectorComponent::substractToVolume(G4VSolid *p_inputV
         trans = getNewPosition(p_substractionPos, p_substractionRot, Component.Position, Component.Rotation);
         G4String mssg = "Substracting " + key + " from " + p_inputVolume->GetName() + ".";
         log_trace(mssg);
+        // If this component is a CAD tessellated solid, warn which component is used
+        if (dynamic_cast<G4TessellatedSolid *>(Component.VSolid)) {
+            log_warning("Subtracting tessellated solid '{}' from '{}' (component '{}')", Component.Name, p_inputVolume->GetName(), key);
+        }
         if (counter == 0)
         {
             substractedVolume = new G4SubtractionSolid("SubstractedVolume", p_inputVolume, Component.VSolid, trans);
@@ -218,6 +226,9 @@ G4SubtractionSolid *OMSimDetectorComponent::substractToVolume(G4VSolid *p_inputV
     {
         G4String mssg = "Substracting " + key + " from " + p_inputVolume->GetName() + ".";
         log_trace(mssg);
+        if (dynamic_cast<G4TessellatedSolid *>(Component.VSolid)) {
+            log_warning("Subtracting tessellated solid '{}' from '{}' (component '{}')", Component.Name, p_inputVolume->GetName(), key);
+        }
         if (counter == 0)
         {
             substractedVolume = new G4SubtractionSolid("SubstractedVolume", p_inputVolume, Component.VSolid, p_trans);
@@ -251,3 +262,5 @@ const G4VisAttributes OMSimDetectorComponent::m_blackVis = G4VisAttributes(G4Col
 const G4VisAttributes OMSimDetectorComponent::m_LEDvis = G4VisAttributes(G4Colour(0.2, 0.6, 0.8, 0.5));
 const G4VisAttributes OMSimDetectorComponent::m_photocathodeVis = G4VisAttributes(G4Colour(1.0, 0.7, 0.0, 1));
 const G4VisAttributes OMSimDetectorComponent::m_invisibleVis = G4VisAttributes::GetInvisible();
+const G4VisAttributes OMSimDetectorComponent::m_pom_flange = G4VisAttributes(G4Colour(0.9, 0.9, 0.9, 1.0));
+const G4VisAttributes OMSimDetectorComponent::m_pom_frame = G4VisAttributes(G4Colour(0.2, 0.2, 0.2, 1.0));

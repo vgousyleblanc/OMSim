@@ -1,0 +1,26 @@
+{
+  "jName": "Plastic",
+   "jDensity": 1.2,
+  "jModel": "unified",
+  "jFinish": "ground",
+  "jType": "dielectric_metal",
+  "jComponents": {
+      "G4_C": 0.5455,
+      "G4_H": 0.0606,
+      "G4_O": 0.3939
+   },
+  "jSigmaAlpha": 0.3,
+  "jProperties": {
+    "REFLECTIVITY": {
+      "jWavelength": [
+        1239.84,
+        247.97
+      ],
+      "jValue": [
+        0.5,
+        0.5
+      ]
+    }
+  },
+"jState": "kStateSolid"
+}

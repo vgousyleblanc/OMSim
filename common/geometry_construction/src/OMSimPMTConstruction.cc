@@ -79,6 +79,8 @@ void OMSimPMTConstruction::construction()
     }
     m_constructionFinished = true;
     log_trace("Construction of PMT finished");
+
+
 }
 
 void OMSimPMTConstruction::constructHAcoating()

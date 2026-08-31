@@ -1,0 +1,26 @@
+{
+  "jName": "Titanium",
+  "jDensity": 4.51,
+  "jComponents": {
+   "G4_Ti": 1.0},
+  "jModel": "unified",
+  "jFinish": "ground",
+  "jType": "dielectric_metal",
+  "jSigmaAlpha": 0.1,
+  "jProperties": {
+    "REFLECTIVITY": {
+      "jWavelength": [
+        1239.84,
+        247.97
+      ],
+      "jValue": [
+        0.5,
+        0.5
+      ]
+    }
+  },
+     "jState": "kStateSolid"
+}
+
+
+

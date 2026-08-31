@@ -15,6 +15,7 @@
 #include <TH2D.h>
 #include <variant>
 #include <optional>
+#include <string>
 
 #include <G4ThreeVector.hh>
 #include <G4RotationMatrix.hh>

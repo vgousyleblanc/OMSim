@@ -87,5 +87,7 @@ protected:
     static const G4VisAttributes m_LEDvis;
     static const G4VisAttributes m_photocathodeVis;
     static const G4VisAttributes m_invisibleVis;
+    static const G4VisAttributes m_pom_frame;
+    static const G4VisAttributes m_pom_flange;
 };
 

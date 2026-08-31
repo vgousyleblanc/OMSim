@@ -48,6 +48,7 @@ private:
     //vectors for positions and rotations
     std::vector<G4ThreeVector> m_positionsPMT;
     std::vector<G4ThreeVector> m_positionsGelpad;
+    std::vector<G4ThreeVector> m_zOffsetPMT;
     std::vector<G4double> m_thetaPMT;
     std::vector<G4double> m_phiPMT;
 
@@ -64,28 +65,49 @@ private:
     const G4double m_xInternalCAD = 68.248*mm;
     const G4double m_yInternalCAD = 0*mm;
     const G4double m_zInternalCAD = -124.218*mm;
-    const G4double m_gelPadDZ = 24.0*mm; //old 30, gelpad thickness 24
-    const G4double m_glassOutRad = 214.0*mm; // Outer vessel radius including 12 mm glass thickness
-    const G4double m_glassThick = 12.0*mm;
-    const G4double m_glassInRad = 202.0*mm;   // Inner air cavity radius, 202
+
+    const G4double m_gelPadDZ = 12.0*mm; //old 30, gelpad thickness 24
+  
     const G4double m_cylinderHeight = 80.0*mm;
+    const G4double m_cylinder_outer_radius=229*mm;
     const G4double m_cylinderAngle = 2.5*deg;
     const G4double m_gelThicknessFrontPMT = 3.6*mm;
-    const G4double m_gelThickness = 4.5*mm;
-    const G4double m_EqPMTrOffset = 2.6*mm;
-    const G4double m_EqPMTzOffset = 62.5*mm;
+    const G4double m_EqPMTrOffset = 2.6*mm;//2.6
+    const G4double m_EqPMTzOffset = 15*mm;//62.5
     const G4double m_reflectorHalfZ = 15*mm;
-    const G4double m_reflectorConeSheetThickness = 0.5*mm;
-    const G4double m_reflectorConeToHolder = 1.55*mm;
-    const G4double m_thetaPolar = 36.0*deg;
-    const G4double m_thetaEquatorial = 62.0*deg;
+
+    const G4double m_glassOutRad = 215.9*mm; // Outer vessel radius including 12 mm glass thickness
+    const G4double m_glassThick = 14.0*mm;
+    const G4double m_glassInRad = 201.9*mm;   // Inner air cavity radius, 202
+    //Gelpad parameters
+    const G4double m_gelpad_small_radius= 40* mm;
+    const G4double m_gelThickness=35*mm;
+    const G4double m_polarPadOpeningAngle = 50.0*deg;//30
+    const G4double m_gelpad_large_radius  =m_gelpad_small_radius + tan ( m_polarPadOpeningAngle ) * m_gelThickness;
+    const G4double m_gelpad_overflow_max_radius = 25 * cm;
+    const G4double m_gelpad_overflow_height     =  5 * cm;
+    const G4double m_gelpad_overflow_offset     =  5.11 * mm + m_gelpad_overflow_height / 2;
     const G4int m_numberPolarPMTs = 4;
     const G4int m_numberEqPMTs = 4;
-    const G4double m_polarEquatorialPMTphiPhase = 45.0*deg;
+    
+    const G4double m_frame_offset=12*mm;
+
+    const G4double m_reflectorConeSheetThickness = 0.5*mm;
+    const G4double m_reflectorConeToHolder = 1.55*mm;
+    const G4double m_thetaPolar = 32.5*deg; //36,32.5
+    const G4double m_thetaEquatorial = 65.0*deg; //62,65
+  
+    const G4double m_polarEquatorialPMTphiPhase = 0*deg;//45,0
     const G4double m_equatorialTiltAngle = 15.0*deg;
-    const G4double m_polarPadOpeningAngle = 50.0*deg;//30
-    const G4double m_equatorialPadOpeningAngle = 22.0*deg;
+    
+    
+
+
+    const G4double m_equatorialPadOpeningAngle = 50.0*deg;
+    
     const G4int m_totalNumberPMTs = (m_numberPolarPMTs + m_numberEqPMTs) * 2;
+    
+    
 
     G4double m_PMToffset;
     G4double m_maxPMTRadius;
