@@ -68,7 +68,7 @@ private:
 
     const G4double m_gelPadDZ = 12.0*mm; //old 30, gelpad thickness 24
   
-    const G4double m_cylinderHeight = 80.0*mm;
+
     const G4double m_cylinder_outer_radius=229*mm;
     const G4double m_cylinderAngle = 2.5*deg;
     const G4double m_gelThicknessFrontPMT = 3.6*mm;
@@ -76,6 +76,7 @@ private:
     const G4double m_EqPMTzOffset = 15*mm;//62.5
     const G4double m_reflectorHalfZ = 15*mm;
 
+    const G4double m_cylinderHeight = 80.0*mm;
     const G4double m_glassOutRad = 215.9*mm; // Outer vessel radius including 12 mm glass thickness
     const G4double m_glassThick = 14.0*mm;
     const G4double m_glassInRad = 201.9*mm;   // Inner air cavity radius, 202

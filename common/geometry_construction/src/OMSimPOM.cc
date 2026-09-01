@@ -34,19 +34,81 @@ POM::POM(G4bool p_placeHarness) : OMSimOpticalModule(new OMSimPMTConstruction())
 
 void POM::construction()
 {
-    G4VSolid *glassSolid = pressureVessel(m_glassOutRad, "Glass");
+    //G4VSolid *glassSolid = pressureVessel(m_glassOutRad, "Glass");
     G4VSolid *airSolid = pressureVessel(m_glassInRad, "air"); // Fill entire vessel with gel as logical volume (not placed) for intersectionsolids with gelpads, fill with air 
 
     // Set positions and rotations of PMTs and gelpads
     setPMTAndGelpadPositions();
+    //Materials 
+    auto glassMat = m_data->getMaterial("RiAbs_Glass_Vitrovex");
+    auto tiMat    = m_data->getMaterial("Titanium");
+    auto airMat   = m_data->getMaterial("Ri_Air");
+    G4Ellipsoid *GlassTop =
+        new G4Ellipsoid(
+            "GlassTop",
+            m_glassOutRad,
+            m_glassOutRad,
+            m_glassOutRad,
+            0,
+            m_glassOutRad
+        );
+        G4LogicalVolume *GlassTopLV =
+        new G4LogicalVolume(
+            GlassTop,
+            glassMat,
+            "GlassTopLV"
+        );
+        G4Ellipsoid *GlassBottom =
+        new G4Ellipsoid(
+            "GlassBottom",
+            m_glassOutRad,
+            m_glassOutRad,
+            m_glassOutRad,
+            -m_glassOutRad,
+            0
+        );
+        G4LogicalVolume *GlassBottomLV =new G4LogicalVolume(GlassBottom,glassMat,
+            "GlassBottomLV"
+        );
+    G4Tubs *titaniumCylinder =
+        new G4Tubs(
+            "TitaniumCylinder",
+            m_glassInRad,
+            m_glassOutRad+5*mm,
+            m_cylinderHeight,
+            0,
+            2 * CLHEP::pi
+        );
+    //G4LogicalVolume* glassHalfTopLV =
+    //    new G4LogicalVolume(topHalfSphere, glassMat, "GlassTopLV");
+
+    //G4LogicalVolume* glassBottomLV =new G4LogicalVolume(bottomHalfSphere, glassMat, "GlassBottomLV");
+
+    G4LogicalVolume* titaniumLV = new G4LogicalVolume(titaniumCylinder, tiMat, "TitaniumCylinderLV");
 
     // Main volumes
     //glassSolid = substractToVolume(glassSolid, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "Glass");
     //airSolid = substractToVolume(airSolid, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "Gel");
     
     // Logicals
-    G4LogicalVolume *lglassLogical = new G4LogicalVolume(glassSolid, m_data->getMaterial("RiAbs_Glass_Vitrovex"), " Glass_log"); // Vessel
-    G4LogicalVolume *p_innerVolume = new G4LogicalVolume(airSolid, m_data->getMaterial("Ri_Air"), "InnerVolume"); // Inner volume of vessel (mothervolume of all internal components)
+    //G4LogicalVolume *lglassLogical = new G4LogicalVolume(glassSolid, m_data->getMaterial("RiAbs_Glass_Vitrovex"), " Glass_log"); // Vessel
+    G4LogicalVolume *p_innerVolume = new G4LogicalVolume(airSolid, airMat, "InnerVolume"); // Inner volume of vessel (mothervolume of all internal components)
+    
+    G4VSolid *vesselEnvelope =
+    pressureVessel(m_glassOutRad+5.0*mm, "VesselEnvelope");
+
+    G4LogicalVolume *vesselLV =
+        new G4LogicalVolume(
+            vesselEnvelope,
+            airMat,
+            "VesselLV"
+        );
+
+    // The envelope is only a geometrical mother.
+    // Do not visualize it.
+    //vesselLV->SetVisAttributes(
+    //    G4VisAttributes::GetInvisible()
+    //);
     
    //subtract PCA
    /*
@@ -60,24 +122,37 @@ void POM::construction()
                                            "Glass_log");
     }
     */
+    vesselLV->SetVisAttributes(G4VisAttributes::GetInvisible());
+    new G4PVPlacement(nullptr,G4ThreeVector(),p_innerVolume,"AirPhys",vesselLV,false,0,m_checkOverlaps);
+    new G4PVPlacement(nullptr,G4ThreeVector(),titaniumLV,"TitaniumPhys",vesselLV,false,0,m_checkOverlaps);
+    new G4PVPlacement(nullptr,G4ThreeVector(0, 0, m_cylinderHeight),GlassTopLV,"GlassTopPhys",vesselLV,false,0,m_checkOverlaps);
+    new G4PVPlacement(nullptr,G4ThreeVector(0, 0, -m_cylinderHeight),GlassBottomLV,"GlassBottomPhys",vesselLV,false,0,m_checkOverlaps);
     
     createGelpadLogicalVolumes(airSolid);                                                                                       // logicalvolumes of all gelpads saved globally to be placed below
 
     // Placements
-    new G4PVPlacement(0, G4ThreeVector(0, 0, 0), p_innerVolume, "Gel_physical", lglassLogical, false, 0, m_checkOverlaps);
+    //new G4PVPlacement(0, G4ThreeVector(0, 0, 0), p_innerVolume, "Gel_physical", lglassLogical, false, 0, m_checkOverlaps);
 
     placePMTs(p_innerVolume);
     placeGelpads(p_innerVolume);
 
     InternalCADComponents(p_innerVolume);
+    appendComponent(vesselEnvelope,vesselLV,G4ThreeVector(0, 0, 0),G4RotationMatrix(),"PressureVessel_" + std::to_string(m_index));
 
-    appendComponent(glassSolid, lglassLogical, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "PressureVessel_" + std::to_string(m_index));
+    //appendComponent(glassSolid, lglassLogical, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "PressureVessel_" + std::to_string(m_index));
     
-    if (m_placeHarness) appendEquatorBand();
+    //if (m_placeHarness) appendEquatorBand();
 
     // ---------------- visualisation attributes --------------------------------------------------------------------------------
-    lglassLogical->SetVisAttributes(m_glassVis);
+    //lglassLogical->SetVisAttributes(m_glassVis);
+    GlassTopLV->SetVisAttributes(m_glassVis);
+    GlassBottomLV->SetVisAttributes(m_glassVis);
+    titaniumLV->SetVisAttributes(m_pom_flange);
     p_innerVolume->SetVisAttributes(m_airVis); 
+    //vesselLV->SetVisAttributes(G4VisAttributes::GetInvisible());
+    //GlassTopLV->SetVisAttributes(G4VisAttributes::GetInvisible());
+    //GlassBottomLV->SetVisAttributes(G4VisAttributes::GetInvisible());
+    //p_innerVolume->SetVisAttributes(G4VisAttributes::GetInvisible());
     for (int i = 0; i <= m_totalNumberPMTs - 1; i++)
     {
         m_gelPadLogical[i]->SetVisAttributes(m_gelpadVis); 
@@ -150,7 +225,7 @@ void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
     log_info("Adding frame!");
     Tools::AppendCADComponent(this, 1.0, lOriginInternal_up, lRotation_frame_up, "POM/PMTFrame.obj", "CAD_Frame_up",m_data->getMaterial("NoOptic_Absorber"), m_pom_frame);
     //Tools::AppendCADComponent(this, 10.0, lOriginInternal, lRotation_flange_up, "POM/p-om_flange_glass.obj", "CAD_Flange",m_data->getMaterial("NoOptic_Absorber"), m_pom_flange);
-    Tools::AppendCADComponent(this, 10.0, lOriginInternal, lRotation_flange_up, "POM/p-om_flange_frame.obj", "CAD_glass_flange",m_data->getMaterial("Titanium"),m_pom_flange);
+    //Tools::AppendCADComponent(this, 10.0, lOriginInternal, lRotation_flange_up, "POM/p-om_flange_frame.obj", "CAD_glass_flange",m_data->getMaterial("Titanium"),m_pom_flange);
     log_info("Adding flange!");
     Tools::AppendCADComponent(this, 1.0, lOriginInternal_down, lRotation_frame_down, "POM/PMTFrame.obj", "CAD_Frame_down",m_data->getMaterial("Plastic"), m_pom_frame);
     //Electronics
