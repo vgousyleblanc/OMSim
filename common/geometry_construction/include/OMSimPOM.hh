@@ -16,6 +16,7 @@ public:
     POM(G4bool p_placeHarness = true);
     ~POM(){};
     void construction();
+    void PrintVolumeTree(G4LogicalVolume* lv, G4int depth);
     double getPressureVesselWeight() {return (5.38+5.35)*kg;};
     int getNumberOfPMTs() { return m_totalNumberPMTs;};
     
@@ -71,7 +72,7 @@ private:
 
     const G4double m_cylinder_outer_radius=229*mm;
     const G4double m_cylinderAngle = 2.5*deg;
-    const G4double m_gelThicknessFrontPMT = 3.6*mm;
+    const G4double m_gelThicknessFrontPMT = 2.0*mm;
     const G4double m_EqPMTrOffset = 2.6*mm;//2.6
     const G4double m_EqPMTzOffset = 15*mm;//62.5
     const G4double m_reflectorHalfZ = 15*mm;
@@ -81,13 +82,11 @@ private:
     const G4double m_glassThick = 14.0*mm;
     const G4double m_glassInRad = 201.9*mm;   // Inner air cavity radius, 202
     //Gelpad parameters
-    const G4double m_gelpad_small_radius= 40* mm;
-    const G4double m_gelThickness=35*mm;
-    const G4double m_polarPadOpeningAngle = 50.0*deg;//30
-    const G4double m_gelpad_large_radius  =m_gelpad_small_radius + tan ( m_polarPadOpeningAngle ) * m_gelThickness;
-    const G4double m_gelpad_overflow_max_radius = 25 * cm;
-    const G4double m_gelpad_overflow_height     =  5 * cm;
-    const G4double m_gelpad_overflow_offset     =  5.11 * mm + m_gelpad_overflow_height / 2;
+    const G4double m_gelpad_small_radius = 40.0 * mm;
+    const G4double m_gelpad_thickness = 24.0 * mm;
+    const G4double m_polarPadOpeningAngle = 50.0 * deg;
+    const G4double m_gelpad_large_radius = m_gelpad_small_radius + std::tan(m_polarPadOpeningAngle) * m_gelpad_thickness;
+    const G4double m_gelpad_sphere_radius = m_glassInRad;
     const G4int m_numberPolarPMTs = 4;
     const G4int m_numberEqPMTs = 4;
     

@@ -15,6 +15,8 @@
 #include <G4Polycone.hh>
 #include <G4EllipticalCone.hh>
 #include <G4TessellatedSolid.hh>
+#include <G4LogicalVolumeStore.hh>
+#include <G4PhysicalVolumeStore.hh>
 
 
 POM::POM(G4bool p_placeHarness) : OMSimOpticalModule(new OMSimPMTConstruction()), m_placeHarness(p_placeHarness)
@@ -32,130 +34,83 @@ POM::POM(G4bool p_placeHarness) : OMSimOpticalModule(new OMSimPMTConstruction())
     log_trace("Finished constructing POM");
 }
 
+void POM::PrintVolumeTree(G4LogicalVolume* lv, G4int depth)
+{
+    if (!lv) return;
+
+    for (G4int i = 0; i < depth; ++i)
+        G4cout << "  ";
+
+    G4cout << lv->GetName()
+           << "  material=" << lv->GetMaterial()->GetName()
+           << "  daughters=" << lv->GetNoDaughters()
+           << G4endl;
+
+    for (G4int i = 0; i < lv->GetNoDaughters(); ++i)
+    {
+        auto pv = lv->GetDaughter(i);
+        for (G4int j = 0; j < depth + 1; ++j)
+            G4cout << "  ";
+        G4cout << "-> " << pv->GetName() << G4endl;
+        PrintVolumeTree(pv->GetLogicalVolume(), depth + 1);
+    }
+}
+
 void POM::construction()
 {
-    //G4VSolid *glassSolid = pressureVessel(m_glassOutRad, "Glass");
-    G4VSolid *airSolid = pressureVessel(m_glassInRad, "air"); // Fill entire vessel with gel as logical volume (not placed) for intersectionsolids with gelpads, fill with air 
+    // Build a real hollow shell so the optical hierarchy is:
+    // world (water) -> glass shell -> inner cavity -> gelpads/PMTs.
+    // This mirrors the intended POM geometry, with the shell split into two half-spheres
+    // and a titanium ring rather than a single air mother enclosing glass pieces.
+    G4VSolid *innerAirSolid = pressureVessel(m_glassInRad, "InnerAirVoid");
+    G4VSolid *outerGlassSolid = pressureVessel(m_glassOutRad, "GlassShellOuter");
+    G4VSolid *glassShellSolid = new G4SubtractionSolid("GlassShell", outerGlassSolid, innerAirSolid, 0, G4ThreeVector());
 
-    // Set positions and rotations of PMTs and gelpads
     setPMTAndGelpadPositions();
-    //Materials 
+
     auto glassMat = m_data->getMaterial("RiAbs_Glass_Vitrovex");
-    auto tiMat    = m_data->getMaterial("Titanium");
-    auto airMat   = m_data->getMaterial("Ri_Air");
-    G4Ellipsoid *GlassTop =
-        new G4Ellipsoid(
-            "GlassTop",
-            m_glassOutRad,
-            m_glassOutRad,
-            m_glassOutRad,
-            0,
-            m_glassOutRad
-        );
-        G4LogicalVolume *GlassTopLV =
-        new G4LogicalVolume(
-            GlassTop,
-            glassMat,
-            "GlassTopLV"
-        );
-        G4Ellipsoid *GlassBottom =
-        new G4Ellipsoid(
-            "GlassBottom",
-            m_glassOutRad,
-            m_glassOutRad,
-            m_glassOutRad,
-            -m_glassOutRad,
-            0
-        );
-        G4LogicalVolume *GlassBottomLV =new G4LogicalVolume(GlassBottom,glassMat,
-            "GlassBottomLV"
-        );
-    G4Tubs *titaniumCylinder =
-        new G4Tubs(
-            "TitaniumCylinder",
-            m_glassInRad,
-            m_glassOutRad+5*mm,
-            m_cylinderHeight,
-            0,
-            2 * CLHEP::pi
-        );
-    //G4LogicalVolume* glassHalfTopLV =
-    //    new G4LogicalVolume(topHalfSphere, glassMat, "GlassTopLV");
+    auto tiMat = m_data->getMaterial("Titanium");
+    auto airMat = m_data->getMaterial("Ri_Air");
 
-    //G4LogicalVolume* glassBottomLV =new G4LogicalVolume(bottomHalfSphere, glassMat, "GlassBottomLV");
+    G4LogicalVolume *glassShellLV = new G4LogicalVolume(glassShellSolid, glassMat, "GlassShellLV");
+    G4LogicalVolume *innerAirLV = new G4LogicalVolume(innerAirSolid, airMat, "InnerAirLV");
 
-    G4LogicalVolume* titaniumLV = new G4LogicalVolume(titaniumCylinder, tiMat, "TitaniumCylinderLV");
+    G4Tubs *titaniumCylinder = new G4Tubs("TitaniumCylinder", m_glassInRad, m_glassOutRad + 5 * mm, m_cylinderHeight, 0, 2 * CLHEP::pi);
+    G4LogicalVolume *titaniumLV = new G4LogicalVolume(titaniumCylinder, tiMat, "TitaniumCylinderLV");
 
-    // Main volumes
-    //glassSolid = substractToVolume(glassSolid, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "Glass");
-    //airSolid = substractToVolume(airSolid, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "Gel");
-    
-    // Logicals
-    //G4LogicalVolume *lglassLogical = new G4LogicalVolume(glassSolid, m_data->getMaterial("RiAbs_Glass_Vitrovex"), " Glass_log"); // Vessel
-    G4LogicalVolume *p_innerVolume = new G4LogicalVolume(airSolid, airMat, "InnerVolume"); // Inner volume of vessel (mothervolume of all internal components)
-    
-    G4VSolid *vesselEnvelope =
-    pressureVessel(m_glassOutRad+5.0*mm, "VesselEnvelope");
+    // Place the cavity inside the glass shell and the titanium ring as a daughter of the shell.
+    new G4PVPlacement(nullptr, G4ThreeVector(), innerAirLV, "InnerAirPhys", glassShellLV, false, 0, m_checkOverlaps);
+    new G4PVPlacement(nullptr, G4ThreeVector(), titaniumLV, "TitaniumPhys", glassShellLV, false, 0, m_checkOverlaps);
 
-    G4LogicalVolume *vesselLV =
-        new G4LogicalVolume(
-            vesselEnvelope,
-            airMat,
-            "VesselLV"
-        );
+    createGelpadLogicalVolumes(innerAirSolid);
+    placePMTs(innerAirLV);
+    placeGelpads(innerAirLV);
+    InternalCADComponents(innerAirLV);
 
-    // The envelope is only a geometrical mother.
-    // Do not visualize it.
-    //vesselLV->SetVisAttributes(
-    //    G4VisAttributes::GetInvisible()
-    //);
-    
-   //subtract PCA
-   /*
-   if (m_placeHarness)
-    {
-        p_innerVolume = new G4LogicalVolume(substractHarnessPCA(airSolid),
-                                         m_data->getMaterial("Ri_Air"),
-                                         "InnerVolume");
-        lglassLogical = new G4LogicalVolume(substractHarnessPCA(glassSolid),
-                                           m_data->getMaterial("RiAbs_Glass_Vitrovex"),
-                                           "Glass_log");
-    }
-    */
-    vesselLV->SetVisAttributes(G4VisAttributes::GetInvisible());
-    new G4PVPlacement(nullptr,G4ThreeVector(),p_innerVolume,"AirPhys",vesselLV,false,0,m_checkOverlaps);
-    new G4PVPlacement(nullptr,G4ThreeVector(),titaniumLV,"TitaniumPhys",vesselLV,false,0,m_checkOverlaps);
-    new G4PVPlacement(nullptr,G4ThreeVector(0, 0, m_cylinderHeight),GlassTopLV,"GlassTopPhys",vesselLV,false,0,m_checkOverlaps);
-    new G4PVPlacement(nullptr,G4ThreeVector(0, 0, -m_cylinderHeight),GlassBottomLV,"GlassBottomPhys",vesselLV,false,0,m_checkOverlaps);
-    
-    createGelpadLogicalVolumes(airSolid);                                                                                       // logicalvolumes of all gelpads saved globally to be placed below
+    // Keep this component registered so the module can be placed in the world later.
+    appendComponent(glassShellSolid, glassShellLV, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "PressureVessel_" + std::to_string(m_index));
 
-    // Placements
-    //new G4PVPlacement(0, G4ThreeVector(0, 0, 0), p_innerVolume, "Gel_physical", lglassLogical, false, 0, m_checkOverlaps);
-
-    placePMTs(p_innerVolume);
-    placeGelpads(p_innerVolume);
-
-    InternalCADComponents(p_innerVolume);
-    appendComponent(vesselEnvelope,vesselLV,G4ThreeVector(0, 0, 0),G4RotationMatrix(),"PressureVessel_" + std::to_string(m_index));
-
-    //appendComponent(glassSolid, lglassLogical, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "PressureVessel_" + std::to_string(m_index));
-    
-    //if (m_placeHarness) appendEquatorBand();
-
-    // ---------------- visualisation attributes --------------------------------------------------------------------------------
-    //lglassLogical->SetVisAttributes(m_glassVis);
-    GlassTopLV->SetVisAttributes(m_glassVis);
-    GlassBottomLV->SetVisAttributes(m_glassVis);
+    glassShellLV->SetVisAttributes(m_glassVis);
+    innerAirLV->SetVisAttributes(m_airVis);
     titaniumLV->SetVisAttributes(m_pom_flange);
-    p_innerVolume->SetVisAttributes(m_airVis); 
-    //vesselLV->SetVisAttributes(G4VisAttributes::GetInvisible());
-    //GlassTopLV->SetVisAttributes(G4VisAttributes::GetInvisible());
-    //GlassBottomLV->SetVisAttributes(G4VisAttributes::GetInvisible());
-    //p_innerVolume->SetVisAttributes(G4VisAttributes::GetInvisible());
+
+    auto worldLV = G4LogicalVolumeStore::GetInstance()->GetVolume("World_log");
+    if (worldLV)
+    {
+        G4cout << "=== POM volume tree validation ===" << G4endl;
+        PrintVolumeTree(worldLV, 0);
+    }
+
+    if (auto gel = G4PhysicalVolumeStore::GetInstance()->GetVolume("GelPad_0"))
+        G4cout << "GelPad_0 mother: " << gel->GetMotherLogical()->GetName() << G4endl;
+    if (auto pmt = G4PhysicalVolumeStore::GetInstance()->GetVolume("PMT_0"))
+        G4cout << "PMT_0 mother:    " << pmt->GetMotherLogical()->GetName() << G4endl;
+    if (auto glass = G4PhysicalVolumeStore::GetInstance()->GetVolume("GlassShellPhys"))
+        G4cout << "GlassShellPhys mother: " << glass->GetMotherLogical()->GetName() << G4endl;
+
     for (int i = 0; i <= m_totalNumberPMTs - 1; i++)
     {
-        m_gelPadLogical[i]->SetVisAttributes(m_gelpadVis); 
+        m_gelPadLogical[i]->SetVisAttributes(m_gelpadVis);
     }
 }
 
@@ -244,21 +199,19 @@ void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
 
 void POM::setPMTAndGelpadPositions()
 {
-G4double rPMT;       // radius for PMT positioning
-G4double rpad; // radius for RefCone positioning
-G4double zOffsetPMT;
-G4double rReflector;
-G4RotationMatrix rot;
-G4RotationMatrix rot2;
-G4double thetaPMT;
-G4double phiPMT;
+    G4double rPMT;
+    G4double rGelpad;
+    G4double zOffsetPMT;
+    G4RotationMatrix rot;
+    G4RotationMatrix rot2;
+    G4double thetaPMT;
+    G4double phiPMT;
 
-    G4double rBasePMT = m_glassInRad - m_PMToffset-2+5;// Overlaps ?
-    G4double reflectorpad = m_glassInRad -2;
+    G4double rBasePMT = m_glassInRad - m_gelThicknessFrontPMT - m_PMToffset;
+    G4double rBaseGelpad = rBasePMT + m_reflectorHalfZ;
 
     std::vector<G4double> thetaPMTlist = {m_thetaPolar, m_thetaEquatorial, 180. * deg - m_thetaEquatorial, 180. * deg - m_thetaPolar};
     std::vector<G4double> zOffsetPMTlist = {m_cylinderHeight-m_frame_offset, m_cylinderHeight-m_frame_offset, -m_cylinderHeight+m_frame_offset, -m_cylinderHeight+m_frame_offset};
-    //std::vector<G4double> zOffsetPMTlist = {m_cylinderHeight, m_cylinderHeight - m_EqPMTzOffset, -m_cylinderHeight + m_EqPMTzOffset, -m_cylinderHeight};
     std::vector<int> countPMTlist = {m_numberPolarPMTs, m_numberEqPMTs, m_numberEqPMTs, m_numberPolarPMTs};
     std::vector<G4double> phaseShiftList = {0, 0.5, 0.5, 0.};
 
@@ -267,12 +220,12 @@ G4double phiPMT;
         thetaPMT = thetaPMTlist[j];
         zOffsetPMT = zOffsetPMTlist[j];
         rPMT = rBasePMT;
-        rReflector = reflectorpad;
-        //if (j >= 1 && j <= 2)
-       // {
-       //     rPMT += m_EqPMTrOffset;
-       //     rReflector += m_EqPMTrOffset;
-       // }
+        rGelpad = rBaseGelpad;
+        if (j >= 1 && j <= 2)
+        {
+            rPMT += m_EqPMTrOffset;
+            rGelpad += m_EqPMTrOffset;
+        }
 
         for (int i = 0; i < countPMTlist[j]; i++)
         {
@@ -282,10 +235,13 @@ G4double phiPMT;
             phiPMT = (phaseShiftList[j]+i)*90.0*deg+45*deg;//(i + phaseShiftList[j]) * 360. * deg / countPMTlist[j];
             std::cout<<"Angle"<<phiPMT / deg <<" "<<thetaPMT / deg <<std::endl;
             G4double lPMTrho = rPMT * sin(thetaPMT);
-            m_positionsPMT.push_back(G4ThreeVector(lPMTrho * cos(phiPMT), lPMTrho * sin(phiPMT), rPMT * cos(thetaPMT) + zOffsetPMT));
+            G4ThreeVector pmtCenter(lPMTrho * cos(phiPMT), lPMTrho * sin(phiPMT), rPMT * cos(thetaPMT) + zOffsetPMT);
+            m_positionsPMT.push_back(pmtCenter);
 
-            G4double lRefConeRho = rReflector * sin(thetaPMT);
-            m_positionsGelpad.push_back(G4ThreeVector(lRefConeRho * cos(phiPMT), lRefConeRho * sin(phiPMT), rReflector * cos(thetaPMT) + zOffsetPMT));
+            G4double lGelpadRho = rGelpad * sin(thetaPMT);
+            m_positionsGelpad.push_back(G4ThreeVector(lGelpadRho * cos(phiPMT),
+                                                       lGelpadRho * sin(phiPMT),
+                                                       rGelpad * cos(thetaPMT) + zOffsetPMT));
             m_thetaPMT.push_back(thetaPMT);
             m_phiPMT.push_back(phiPMT);
             //m_zOffsetPMT.push_back(zOffsetPMT);
@@ -622,73 +578,59 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
     G4IntersectionSolid *cutCone;
     G4LogicalVolume *gelPadLogical;
     G4SubtractionSolid *cutConeFinal;
+
     // create logical volume for each gelpad
     for (int k = 0; k <= m_totalNumberPMTs - 1; k++)
     {
         G4Transform3D *tra;
-        G4Transform3D *tra2;
-    G4VSolid* GelPadBasic= new G4Cons("GelPadBasic",
-                                        0,               //inside radius at -pDz
-                                        m_gelpad_small_radius,   //outside radius at -pDz
-                                        0  * mm,               //inside radius at +pDz
-                                        m_gelpad_large_radius,   //outside radius at +pDz
-                                        m_gelThickness/2 ,  //half length in Z
-                                        0,                     //starting angle of the segment in radians
-                                        2*CLHEP::pi);   
 
-    // Tube to model overflow of interface gel between gelpad and glass
-    G4Tubs* gelpad_overflow_tubs = new G4Tubs("gelpad_overflow_tub",
-                                             0,
-                                             m_gelpad_overflow_max_radius,
-                                             m_gelpad_overflow_height / 2,
-                                             0,
-                                             360 * degree);
-
-    // gelpad cone and tubs
-    G4VSolid* gelpad_cone_and_tubs = new G4UnionSolid("gelpad_cone_and_tubs",
-                                                      GelPadBasic,
-                                                      gelpad_overflow_tubs,
-                                                      nullptr,
-                                                      G4ThreeVector(0,0,0));
-
-    // gelpad sphere models inside of glass dome (to cut edges of cone)
-    // slightly larger than real counterpart
-    G4VSolid* gelpad_sphere_cut = new G4Sphere("gelpad_sphere_cut",
-                                               0,               //r min
-                                               m_glassInRad,   //r max
-                                               0,               //start phi
-                                               2*CLHEP::pi,            // end phi
-                                               0,               //start theta
-                                               CLHEP::pi);             //end theta
-
-    // Intersection between gelpad cone and sphere
-    // creates spherical top surface on gelpad
-    //G4double z_translation = - m_glassInRad+ (m_gelThickness / 2);
-    
-    //G4double z_translation=m_zOffsetPMT[k];
-    G4VSolid* gelpad_solid = new G4IntersectionSolid("gelpad",
-                                                gelpad_cone_and_tubs,                //solid 1
-                                                gelpad_sphere_cut,                   //solid 2
-                                                new G4RotationMatrix(0,0,0),         //rotation (identity)
-                                                G4ThreeVector(0, 0, 0)); //translation
-                                   
         m_converter.str("");
         m_converter2.str("");
         m_converter << "GelPad_" << k << "_solid";
-        m_converter2 << "Gelpad_final" << k << "_logical";
-        // polar gel pads
-        // rotation and position of gelpad
-        G4RotationMatrix *rotation = new G4RotationMatrix();
-        rotation->rotateY(m_thetaPMT[k]);
-        rotation->rotateZ(m_phiPMT[k]);
+        m_converter2 << "Gelpad_final_" << k << "_logical";
+
+        G4VSolid *gelpadCone = new G4Cons(m_converter.str() + "_cone",
+                          0,
+                  m_gelpad_small_radius,
+                          0,
+                  m_gelpad_large_radius,
+                  m_gelpad_thickness / 2.0,
+                          0,
+                          2 * CLHEP::pi);
+
+                G4RotationMatrix *rotation = new G4RotationMatrix();
+                rotation->rotateY(m_thetaPMT[k]);
+                rotation->rotateZ(m_phiPMT[k]);
+
+        G4VSolid *gelpadSphereCut = new G4Sphere(m_converter.str() + "_sphere_cut",
+                             0,
+                             m_gelpad_sphere_radius,
+                             0,
+                             2 * CLHEP::pi,
+                             0,
+                             CLHEP::pi);
+        G4double hemisphereCenterZ = k < m_totalNumberPMTs / 2
+                         ? m_cylinderHeight
+                         : -m_cylinderHeight;
+        G4ThreeVector sphereCenterWorld(0, 0, hemisphereCenterZ);
+        G4ThreeVector sphereCenterLocal = rotation->inverse() * (sphereCenterWorld - m_positionsGelpad[k]);
+        G4Transform3D sphereTransform(G4RotationMatrix(), sphereCenterLocal);
+        G4VSolid *gelpadSolid = new G4IntersectionSolid(m_converter.str() + "_profile",
+                                gelpadCone,
+                                gelpadSphereCut,
+                                sphereTransform);
+
         tra = new G4Transform3D(*rotation, G4ThreeVector(m_positionsGelpad[k]));
         G4Transform3D transformers = G4Transform3D(*rotation, G4ThreeVector(m_positionsPMT[k]));
-        // creating volumes ... basic cone, subtract PMT, logical volume of gelpad
-        cutCone = new G4IntersectionSolid(m_converter.str(), p_gelSolid, GelPadBasic, *tra);
-        cutConeFinal = new G4SubtractionSolid(m_converter.str(), cutCone, solidPMT, transformers);
+        G4Transform3D gelpadTransform = G4Transform3D(*rotation, G4ThreeVector(m_positionsGelpad[k]));
+
+        // Apply the local profile once at the PMT position, then clip it to the inner cavity.
+        cutCone = new G4IntersectionSolid(m_converter.str(), p_gelSolid, gelpadSolid, gelpadTransform);
+        cutConeFinal = new G4SubtractionSolid(m_converter.str() + "_minus_pmt", cutCone, solidPMT, transformers);
         gelPadLogical = new G4LogicalVolume(cutConeFinal, m_data->getMaterial("RiAbs_Gel_Shin-Etsu"), m_converter2.str());
-        // save logicalvolume of gelpads in array
-        m_gelPadLogical.push_back(gelPadLogical); //
+
+        // save logical volume of gelpads in array
+        m_gelPadLogical.push_back(gelPadLogical);
     }
         
 }
@@ -724,4 +666,4 @@ void POM::placeGelpads(G4LogicalVolume *p_innerVolume)
 
         new G4PVPlacement(0, G4ThreeVector(0, 0, 0), m_gelPadLogical[k], m_converter.str(), p_innerVolume, false, 0, m_checkOverlaps);
     }
-}
+} 
