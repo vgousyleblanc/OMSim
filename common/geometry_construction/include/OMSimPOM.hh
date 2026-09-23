@@ -75,7 +75,6 @@ private:
     const G4double m_gelThicknessFrontPMT = 2.0*mm;
     const G4double m_EqPMTrOffset = 2.6*mm;//2.6
     const G4double m_EqPMTzOffset = 15*mm;//62.5
-    const G4double m_reflectorHalfZ = 15*mm;
 
     const G4double m_cylinderHeight = 80.0*mm;
     const G4double m_glassOutRad = 215.9*mm; // Outer vessel radius including 12 mm glass thickness

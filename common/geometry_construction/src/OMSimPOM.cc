@@ -64,7 +64,22 @@ void POM::construction()
     // and a titanium ring rather than a single air mother enclosing glass pieces.
     G4VSolid *innerAirSolid = pressureVessel(m_glassInRad, "InnerAirVoid");
     G4VSolid *outerGlassSolid = pressureVessel(m_glassOutRad, "GlassShellOuter");
-    G4VSolid *glassShellSolid = new G4SubtractionSolid("GlassShell", outerGlassSolid, innerAirSolid, 0, G4ThreeVector());
+    // The titanium ring is physically thicker than the glass and the glass hemispheres are
+    // glued to it, so its real outer radius (m_cylinder_outer_radius) genuinely extends past
+    // m_glassOutRad. That means it cannot be a daughter of the glass shell (a daughter can
+    // never exceed its mother's own bounds) - it must sit alongside the shell as a sibling,
+    // both placed directly in the world. The glass shell still needs this same cylindrical
+    // band carved out of it, since no glass exists there at all (only titanium).
+    G4Tubs *titaniumCylinder = new G4Tubs("TitaniumCylinder", m_glassInRad, m_cylinder_outer_radius, m_cylinderHeight, 0, 2 * CLHEP::pi);
+    // Cut the glass shell with a slightly padded copy of the cavity+titanium region, not the
+    // exact solids themselves: their inner boundary exactly coincides with innerAirSolid's own
+    // surface (both at m_glassInRad), which is a classic G4 boolean-solid degeneracy - it
+    // confuses inside/outside classification right at that shared surface.
+    const G4double kCutPadding = 0.01 * mm;
+    G4Tubs *titaniumCutter = new G4Tubs("TitaniumCutter", m_glassInRad - kCutPadding, m_cylinder_outer_radius,
+                                         m_cylinderHeight + kCutPadding, 0, 2 * CLHEP::pi);
+    G4VSolid *glassShellSolid = new G4SubtractionSolid("GlassShellMinusCavity", outerGlassSolid, innerAirSolid, 0, G4ThreeVector());
+    glassShellSolid = new G4SubtractionSolid("GlassShell", glassShellSolid, titaniumCutter, 0, G4ThreeVector());
 
     setPMTAndGelpadPositions();
 
@@ -75,12 +90,12 @@ void POM::construction()
     G4LogicalVolume *glassShellLV = new G4LogicalVolume(glassShellSolid, glassMat, "GlassShellLV");
     G4LogicalVolume *innerAirLV = new G4LogicalVolume(innerAirSolid, airMat, "InnerAirLV");
 
-    G4Tubs *titaniumCylinder = new G4Tubs("TitaniumCylinder", m_glassInRad, m_glassOutRad + 5 * mm, m_cylinderHeight, 0, 2 * CLHEP::pi);
     G4LogicalVolume *titaniumLV = new G4LogicalVolume(titaniumCylinder, tiMat, "TitaniumCylinderLV");
 
-    // Place the cavity inside the glass shell and the titanium ring as a daughter of the shell.
+    // Place the cavity inside the glass shell. The titanium ring is NOT placed here - it is
+    // wider than the glass shell (see comment above) and is instead appended as its own
+    // top-level component below, so it gets placed as a sibling of the shell in the world.
     new G4PVPlacement(nullptr, G4ThreeVector(), innerAirLV, "InnerAirPhys", glassShellLV, false, 0, m_checkOverlaps);
-    new G4PVPlacement(nullptr, G4ThreeVector(), titaniumLV, "TitaniumPhys", glassShellLV, false, 0, m_checkOverlaps);
 
     createGelpadLogicalVolumes(innerAirSolid);
     placePMTs(innerAirLV);
@@ -89,6 +104,7 @@ void POM::construction()
 
     // Keep this component registered so the module can be placed in the world later.
     appendComponent(glassShellSolid, glassShellLV, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "PressureVessel_" + std::to_string(m_index));
+    appendComponent(titaniumCylinder, titaniumLV, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "TitaniumFlange_" + std::to_string(m_index));
 
     glassShellLV->SetVisAttributes(m_glassVis);
     innerAirLV->SetVisAttributes(m_airVis);
@@ -181,8 +197,20 @@ void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
     Tools::AppendCADComponent(this, 1.0, lOriginInternal_up, lRotation_frame_up, "POM/PMTFrame.obj", "CAD_Frame_up",m_data->getMaterial("NoOptic_Absorber"), m_pom_frame);
     //Tools::AppendCADComponent(this, 10.0, lOriginInternal, lRotation_flange_up, "POM/p-om_flange_glass.obj", "CAD_Flange",m_data->getMaterial("NoOptic_Absorber"), m_pom_flange);
     //Tools::AppendCADComponent(this, 10.0, lOriginInternal, lRotation_flange_up, "POM/p-om_flange_frame.obj", "CAD_glass_flange",m_data->getMaterial("Titanium"),m_pom_flange);
+    {
+    auto comp = getComponent("CAD_Frame_up");
+    new G4PVPlacement(G4Transform3D(lRotation_frame_up, G4ThreeVector()),
+        comp.VLogical, "CAD_Frame_up_physical", p_innerVolume, false, 0, m_checkOverlaps);
+    deleteComponent("CAD_Frame_up");
+    }
     log_info("Adding flange!");
     Tools::AppendCADComponent(this, 1.0, lOriginInternal_down, lRotation_frame_down, "POM/PMTFrame.obj", "CAD_Frame_down",m_data->getMaterial("Plastic"), m_pom_frame);
+    {
+    auto comp = getComponent("CAD_Frame_down");
+    new G4PVPlacement(G4Transform3D(lRotation_frame_down, G4ThreeVector()),
+        comp.VLogical, "CAD_Frame_down_physical", p_innerVolume, false, 0, m_checkOverlaps);
+    deleteComponent("CAD_Frame_down");
+    }
     //Electronics
     
     log_info("Simplified LOM electronics are defined as absorber!");
@@ -208,7 +236,9 @@ void POM::setPMTAndGelpadPositions()
     G4double phiPMT;
 
     G4double rBasePMT = m_glassInRad - m_gelThicknessFrontPMT - m_PMToffset;
-    G4double rBaseGelpad = rBasePMT + m_reflectorHalfZ;
+    // Anchor the gelpad's outer face to the glass directly (independent of PMT position);
+    // the PMT's own placement (via m_gelThicknessFrontPMT) then sets the front gel clearance.
+    G4double rBaseGelpad = m_glassInRad - m_gelpad_thickness / 2.0;
 
     std::vector<G4double> thetaPMTlist = {m_thetaPolar, m_thetaEquatorial, 180. * deg - m_thetaEquatorial, 180. * deg - m_thetaPolar};
     std::vector<G4double> zOffsetPMTlist = {m_cylinderHeight-m_frame_offset, m_cylinderHeight-m_frame_offset, -m_cylinderHeight+m_frame_offset, -m_cylinderHeight+m_frame_offset};
