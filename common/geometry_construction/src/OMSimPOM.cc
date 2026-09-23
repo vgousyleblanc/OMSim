@@ -18,8 +18,15 @@
 #include <G4LogicalVolumeStore.hh>
 #include <G4PhysicalVolumeStore.hh>
 
+const G4double POM::m_gelThicknessFrontPMT = 2.0 * mm;
+const G4double POM::m_gelpad_small_radius = 40.0 * mm;
+const G4double POM::m_gelpad_thickness = 24.0 * mm;
+const G4double POM::m_polarPadOpeningAngle = 50.0 * deg;
+const G4double POM::m_gelpad_large_radius = POM::m_gelpad_small_radius + std::tan(POM::m_polarPadOpeningAngle) * POM::m_gelpad_thickness;
 
-POM::POM(G4bool p_placeHarness) : OMSimOpticalModule(new OMSimPMTConstruction()), m_placeHarness(p_placeHarness)
+POM::POM(G4bool p_placeHarness) : OMSimOpticalModule(new OMSimPMTConstruction()), m_placeHarness(p_placeHarness),
+    m_singleHemisphere(OMSimCommandArgsTable::getInstance().get<bool>("single_hemisphere")),
+    m_numberBuiltPMTs(m_singleHemisphere ? (m_numberPolarPMTs + m_numberEqPMTs) : m_totalNumberPMTs)
 {
     log_info("Constructing POM");
     m_managerPMT->includeHAcoating();
@@ -62,39 +69,48 @@ void POM::construction()
     // world (water) -> glass shell -> inner cavity -> gelpads/PMTs.
     // This mirrors the intended POM geometry, with the shell split into two half-spheres
     // and a titanium ring rather than a single air mother enclosing glass pieces.
-    G4VSolid *innerAirSolid = pressureVessel(m_glassInRad, "InnerAirVoid");
-    G4VSolid *outerGlassSolid = pressureVessel(m_glassOutRad, "GlassShellOuter");
-    // The titanium ring is physically thicker than the glass and the glass hemispheres are
-    // glued to it, so its real outer radius (m_cylinder_outer_radius) genuinely extends past
-    // m_glassOutRad. That means it cannot be a daughter of the glass shell (a daughter can
-    // never exceed its mother's own bounds) - it must sit alongside the shell as a sibling,
-    // both placed directly in the world. The glass shell still needs this same cylindrical
-    // band carved out of it, since no glass exists there at all (only titanium).
-    G4Tubs *titaniumCylinder = new G4Tubs("TitaniumCylinder", m_glassInRad, m_cylinder_outer_radius, m_cylinderHeight, 0, 2 * CLHEP::pi);
-    // Cut the glass shell with a slightly padded copy of the cavity+titanium region, not the
-    // exact solids themselves: their inner boundary exactly coincides with innerAirSolid's own
-    // surface (both at m_glassInRad), which is a classic G4 boolean-solid degeneracy - it
-    // confuses inside/outside classification right at that shared surface.
-    const G4double kCutPadding = 0.01 * mm;
-    G4Tubs *titaniumCutter = new G4Tubs("TitaniumCutter", m_glassInRad - kCutPadding, m_cylinder_outer_radius,
-                                         m_cylinderHeight + kCutPadding, 0, 2 * CLHEP::pi);
+    G4VSolid *innerAirSolid = pressureVessel(m_glassInRad, "InnerAirVoid", !m_singleHemisphere);
+    G4VSolid *outerGlassSolid = pressureVessel(m_glassOutRad, "GlassShellOuter", !m_singleHemisphere);
     G4VSolid *glassShellSolid = new G4SubtractionSolid("GlassShellMinusCavity", outerGlassSolid, innerAirSolid, 0, G4ThreeVector());
-    glassShellSolid = new G4SubtractionSolid("GlassShell", glassShellSolid, titaniumCutter, 0, G4ThreeVector());
+
+    // The single-hemisphere prototype has no titanium ring at all: the plastic cap is glued
+    // directly onto the open end of the glass, so the titanium cylinder/cutter are only built
+    // in full-module mode.
+    G4Tubs *titaniumCylinder = nullptr;
+    G4LogicalVolume *titaniumLV = nullptr;
+    if (!m_singleHemisphere)
+    {
+        // The titanium ring is physically thicker than the glass and the glass hemispheres are
+        // glued to it, so its real outer radius (m_cylinder_outer_radius) genuinely extends past
+        // m_glassOutRad. That means it cannot be a daughter of the glass shell (a daughter can
+        // never exceed its mother's own bounds) - it must sit alongside the shell as a sibling,
+        // both placed directly in the world. The glass shell still needs this same cylindrical
+        // band carved out of it, since no glass exists there at all (only titanium).
+        titaniumCylinder = new G4Tubs("TitaniumCylinder", m_glassInRad, m_cylinder_outer_radius, m_cylinderHeight, 0, 2 * CLHEP::pi);
+        // Cut the glass shell with a slightly padded copy of the cavity+titanium region, not the
+        // exact solids themselves: their inner boundary exactly coincides with innerAirSolid's own
+        // surface (both at m_glassInRad), which is a classic G4 boolean-solid degeneracy - it
+        // confuses inside/outside classification right at that shared surface.
+        const G4double kCutPadding = 0.01 * mm;
+        G4Tubs *titaniumCutter = new G4Tubs("TitaniumCutter", m_glassInRad - kCutPadding, m_cylinder_outer_radius,
+                                             m_cylinderHeight + kCutPadding, 0, 2 * CLHEP::pi);
+        glassShellSolid = new G4SubtractionSolid("GlassShell", glassShellSolid, titaniumCutter, 0, G4ThreeVector());
+
+        auto tiMat = m_data->getMaterial("Titanium");
+        titaniumLV = new G4LogicalVolume(titaniumCylinder, tiMat, "TitaniumCylinderLV");
+    }
 
     setPMTAndGelpadPositions();
 
     auto glassMat = m_data->getMaterial("RiAbs_Glass_Vitrovex");
-    auto tiMat = m_data->getMaterial("Titanium");
     auto airMat = m_data->getMaterial("Ri_Air");
 
     G4LogicalVolume *glassShellLV = new G4LogicalVolume(glassShellSolid, glassMat, "GlassShellLV");
     G4LogicalVolume *innerAirLV = new G4LogicalVolume(innerAirSolid, airMat, "InnerAirLV");
 
-    G4LogicalVolume *titaniumLV = new G4LogicalVolume(titaniumCylinder, tiMat, "TitaniumCylinderLV");
-
-    // Place the cavity inside the glass shell. The titanium ring is NOT placed here - it is
-    // wider than the glass shell (see comment above) and is instead appended as its own
-    // top-level component below, so it gets placed as a sibling of the shell in the world.
+    // Place the cavity inside the glass shell. The titanium ring (full-module mode only) is NOT
+    // placed here - it is wider than the glass shell (see comment above) and is instead appended
+    // as its own top-level component below, so it gets placed as a sibling of the shell in the world.
     new G4PVPlacement(nullptr, G4ThreeVector(), innerAirLV, "InnerAirPhys", glassShellLV, false, 0, m_checkOverlaps);
 
     createGelpadLogicalVolumes(innerAirSolid);
@@ -102,13 +118,42 @@ void POM::construction()
     placeGelpads(innerAirLV);
     InternalCADComponents(innerAirLV);
 
+    if (m_singleHemisphere)
+    {
+        // Omitting the lower hemisphere and the titanium ring leaves the lower half of the
+        // cavity (z = -m_cylinderHeight..0, radius 0..m_glassInRad) as air, which doesn't match
+        // reality: that volume is occupied by the mounting flange, glued directly onto the
+        // glass tube's inner surface and its open bottom rim - no air gap. Fill it with a solid
+        // plastic block so it touches the glass directly on both the flat rim (bottom) and the
+        // cylindrical wall (sides); only the annulus between m_glassInRad and m_glassOutRad
+        // remains real glass tube wall, unaffected. The block stops short of the electronics
+        // board (still placed at the equator regardless of hemisphere count), rather than
+        // reaching all the way to z=0, since that board genuinely extends below the equator.
+        G4double flangeTopZ = 0.0;
+        if (auto electronics = G4PhysicalVolumeStore::GetInstance()->GetVolume("CAD_Electronics_physical"))
+        {
+            G4ThreeVector boundMin, boundMax;
+            electronics->GetLogicalVolume()->GetSolid()->BoundingLimits(boundMin, boundMax);
+            const G4double kSafetyGap = 2.0 * mm;
+            flangeTopZ = std::min(flangeTopZ, boundMin.z() - kSafetyGap);
+        }
+        const G4double kFlangeHalfHeight = (flangeTopZ + m_cylinderHeight) / 2.0;
+        const G4double kFlangeCenterZ = -m_cylinderHeight + kFlangeHalfHeight;
+        G4Tubs *capSolid = new G4Tubs("HemisphereCap", 0, m_glassInRad, kFlangeHalfHeight, 0, 2 * CLHEP::pi);
+        G4LogicalVolume *capLV = new G4LogicalVolume(capSolid, m_data->getMaterial("Plastic"), "HemisphereCapLV");
+        capLV->SetVisAttributes(m_pom_frame);
+        new G4PVPlacement(nullptr, G4ThreeVector(0, 0, kFlangeCenterZ), capLV, "HemisphereCapPhys", innerAirLV, false, 0, m_checkOverlaps);
+    }
+
     // Keep this component registered so the module can be placed in the world later.
     appendComponent(glassShellSolid, glassShellLV, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "PressureVessel_" + std::to_string(m_index));
-    appendComponent(titaniumCylinder, titaniumLV, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "TitaniumFlange_" + std::to_string(m_index));
+    if (!m_singleHemisphere)
+        appendComponent(titaniumCylinder, titaniumLV, G4ThreeVector(0, 0, 0), G4RotationMatrix(), "TitaniumFlange_" + std::to_string(m_index));
 
     glassShellLV->SetVisAttributes(m_glassVis);
     innerAirLV->SetVisAttributes(m_airVis);
-    titaniumLV->SetVisAttributes(m_pom_flange);
+    if (!m_singleHemisphere)
+        titaniumLV->SetVisAttributes(m_pom_flange);
 
     auto worldLV = G4LogicalVolumeStore::GetInstance()->GetVolume("World_log");
     if (worldLV)
@@ -124,7 +169,7 @@ void POM::construction()
     if (auto glass = G4PhysicalVolumeStore::GetInstance()->GetVolume("GlassShellPhys"))
         G4cout << "GlassShellPhys mother: " << glass->GetMotherLogical()->GetName() << G4endl;
 
-    for (int i = 0; i <= m_totalNumberPMTs - 1; i++)
+    for (int i = 0; i <= m_numberBuiltPMTs - 1; i++)
     {
         m_gelPadLogical[i]->SetVisAttributes(m_gelpadVis);
     }
@@ -132,15 +177,22 @@ void POM::construction()
 
 // ---------------- Component functions --------------------------------------------------------------------------------
 
-G4UnionSolid *POM::pressureVessel(const G4double pOutRad, G4String pSuffix)
+G4UnionSolid *POM::pressureVessel(const G4double pOutRad, G4String pSuffix, G4bool p_bothHemispheres)
 {
     G4Tubs *cylinderSolid = new G4Tubs("Cylinder solid" + pSuffix, 0, pOutRad, m_cylinderHeight, 0, 2 * CLHEP::pi);
 
     G4Ellipsoid *topHalfSphere = new G4Ellipsoid("SphereTop solid" + pSuffix, pOutRad, pOutRad, pOutRad, 0, pOutRad);
-    G4Ellipsoid *bottomHalfSphere = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -pOutRad, 0);
 
     // place hemispheres at the cylinder ends so they start where the cylinder ends
     G4UnionSolid *topUnion = new G4UnionSolid("temp" + pSuffix, cylinderSolid, topHalfSphere, 0, G4ThreeVector(0, 0, m_cylinderHeight));
+
+    // In single-hemisphere mode the lower hemisphere is omitted entirely: the cylinder's own
+    // flat end face at -m_cylinderHeight becomes the vessel's boundary there, matching a
+    // prototype whose missing hemisphere is sealed by a flat cap rather than a glass dome.
+    if (!p_bothHemispheres)
+        return topUnion;
+
+    G4Ellipsoid *bottomHalfSphere = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -pOutRad, 0);
     G4UnionSolid *unionSolid = new G4UnionSolid("OM body" + pSuffix, topUnion, bottomHalfSphere, 0, G4ThreeVector(0, 0, -m_cylinderHeight));
     return unionSolid;
 }
@@ -203,13 +255,17 @@ void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
         comp.VLogical, "CAD_Frame_up_physical", p_innerVolume, false, 0, m_checkOverlaps);
     deleteComponent("CAD_Frame_up");
     }
-    log_info("Adding flange!");
-    Tools::AppendCADComponent(this, 1.0, lOriginInternal_down, lRotation_frame_down, "POM/PMTFrame.obj", "CAD_Frame_down",m_data->getMaterial("Plastic"), m_pom_frame);
+    // The lower frame holds the lower-hemisphere PMTs, which don't exist in single-hemisphere
+    // mode (replaced by the flat cap) - skip it there rather than placing an absorber with
+    // nothing to hold.
+    if (!m_singleHemisphere)
     {
-    auto comp = getComponent("CAD_Frame_down");
-    new G4PVPlacement(G4Transform3D(lRotation_frame_down, G4ThreeVector()),
-        comp.VLogical, "CAD_Frame_down_physical", p_innerVolume, false, 0, m_checkOverlaps);
-    deleteComponent("CAD_Frame_down");
+        log_info("Adding flange!");
+        Tools::AppendCADComponent(this, 1.0, lOriginInternal_down, lRotation_frame_down, "POM/PMTFrame.obj", "CAD_Frame_down",m_data->getMaterial("Plastic"), m_pom_frame);
+        auto comp = getComponent("CAD_Frame_down");
+        new G4PVPlacement(G4Transform3D(lRotation_frame_down, G4ThreeVector()),
+            comp.VLogical, "CAD_Frame_down_physical", p_innerVolume, false, 0, m_checkOverlaps);
+        deleteComponent("CAD_Frame_down");
     }
     //Electronics
     
@@ -245,7 +301,10 @@ void POM::setPMTAndGelpadPositions()
     std::vector<int> countPMTlist = {m_numberPolarPMTs, m_numberEqPMTs, m_numberEqPMTs, m_numberPolarPMTs};
     std::vector<G4double> phaseShiftList = {0, 0.5, 0.5, 0.};
 
-    for (int j = 0; j < 4; j++)
+    // Rings are ordered upper-polar, upper-equatorial, lower-equatorial, lower-polar; in
+    // single-hemisphere mode only the two upper rings exist (the lower hemisphere is capped).
+    const int numberOfRings = m_singleHemisphere ? 2 : 4;
+    for (int j = 0; j < numberOfRings; j++)
     {
         thetaPMT = thetaPMTlist[j];
         zOffsetPMT = zOffsetPMTlist[j];
@@ -610,7 +669,7 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
     G4SubtractionSolid *cutConeFinal;
 
     // create logical volume for each gelpad
-    for (int k = 0; k <= m_totalNumberPMTs - 1; k++)
+    for (int k = 0; k <= m_numberBuiltPMTs - 1; k++)
     {
         G4Transform3D *tra;
 
@@ -639,7 +698,9 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
                              2 * CLHEP::pi,
                              0,
                              CLHEP::pi);
-        G4double hemisphereCenterZ = k < m_totalNumberPMTs / 2
+        // In single-hemisphere mode every built PMT (k < m_numberBuiltPMTs) belongs to the
+        // upper ring, since the lower hemisphere doesn't exist - always use the upper sphere.
+        G4double hemisphereCenterZ = (m_singleHemisphere || k < m_totalNumberPMTs / 2)
                          ? m_cylinderHeight
                          : -m_cylinderHeight;
         G4ThreeVector sphereCenterWorld(0, 0, hemisphereCenterZ);
@@ -668,7 +729,7 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
 
 void POM::placePMTs(G4LogicalVolume *p_innerVolume)
 {
-    for (int k = 0; k <= m_totalNumberPMTs - 1; k++)
+    for (int k = 0; k <= m_numberBuiltPMTs - 1; k++)
     {
         m_converter.str("");
         m_converter << "_" << k;
@@ -684,7 +745,7 @@ void POM::placePMTs(G4LogicalVolume *p_innerVolume)
 
 void POM::placeGelpads(G4LogicalVolume *p_innerVolume)
 {
-    for (int k = 0; k <= m_totalNumberPMTs - 1; k++)
+    for (int k = 0; k <= m_numberBuiltPMTs - 1; k++)
     {
         m_converter.str("");
         m_converter << "GelPad_" << k;
