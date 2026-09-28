@@ -174,9 +174,14 @@ void POM::construction()
     if (auto glass = G4PhysicalVolumeStore::GetInstance()->GetVolume("GlassShellPhys"))
         G4cout << "GlassShellPhys mother: " << glass->GetMotherLogical()->GetName() << G4endl;
 
+    // Slightly red, more opaque than the shared default (m_gelpadVis) - just for POM, so the
+    // gelpad is easy to pick out visually (e.g. from underneath the reflector sleeve) without
+    // changing the shared color other modules (LOM16 etc.) still use. Heap-allocated (not a
+    // local/stack G4VisAttributes) since the logical volume only stores a pointer to it.
+    G4VisAttributes *gelpadVisPOM = new G4VisAttributes(G4Colour(0.8, 0.15, 0.15, 0.5));
     for (int i = 0; i <= m_numberBuiltPMTs - 1; i++)
     {
-        m_gelPadLogical[i]->SetVisAttributes(m_gelpadVis);
+        m_gelPadLogical[i]->SetVisAttributes(gelpadVisPOM);
     }
 }
 
