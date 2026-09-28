@@ -13,6 +13,10 @@
 #include "G4Box.hh"
 #include <G4Cons.hh>
 #include <G4SubtractionSolid.hh>
+#include <G4Sphere.hh>
+#include <G4IntersectionSolid.hh>
+#include <G4LogicalBorderSurface.hh>
+#include <G4VisAttributes.hh>
 
 /**
  * @brief Constructs the world volume (sphere).
@@ -72,8 +76,13 @@ void OMSimEffectiveAreaDetector::constructDetector()
 
         if (placeSinglePMTGelpad)
         {
-            // Glue a gelpad cone onto the PMT's tip - same shape as POM's polar gelpads. With no
-            // glass sphere to clip against here, the far face is just left flat.
+            // Glue a gelpad onto the PMT's tip - same shape as POM's polar gelpads, including
+            // the outer face being cut by the same glass-sphere radius (POM::m_gelpad_sphere_radius),
+            // not left flat. A flat exposed face has a fixed surface normal, so light arriving
+            // off-axis hits it at a steep local angle and suffers heavy Fresnel reflection there -
+            // the real P-OM avoids this because the gelpad's outer curve matches the glass dome
+            // it sits against, so it presents close to normal incidence across a wide angular
+            // range, same as the bare PMT's own dome does.
             G4VSolid *gelpadCone = new G4Cons("SinglePMT_Gelpad_cone",
                                                0, POM::m_gelpad_small_radius,
                                                0, POM::m_gelpad_large_radius,
@@ -86,15 +95,51 @@ void OMSimEffectiveAreaDetector::constructDetector()
             G4ThreeVector gelpadPosition(0, 0, pmtOffset + POM::m_gelpad_thickness / 2.0);
             G4ThreeVector pmtWorldPosition(0, 0, kPMTTranslation);
 
+            // In POM, the gelpad's far face sits exactly on the glass sphere's surface
+            // (rBaseGelpad + thickness/2 == m_glassInRad by construction) - the sphere is huge
+            // (201.9mm) compared to the gelpad's own ~66mm width, so it only actually curves
+            // anything if the gelpad sits right at its surface, not buried deep inside it.
+            // Center the sphere on-axis so it passes through the cone's far face on-axis point.
+            G4double farFaceZ = pmtOffset + POM::m_gelpad_thickness;
+            G4ThreeVector sphereCenterWorld(0, 0, farFaceZ - POM::m_gelpad_sphere_radius);
+            G4VSolid *gelpadSphereCut = new G4Sphere("SinglePMT_Gelpad_sphere_cut",
+                                                      0, POM::m_gelpad_sphere_radius,
+                                                      0, 2 * CLHEP::pi,
+                                                      0, CLHEP::pi);
+            G4Transform3D sphereTransform(G4RotationMatrix(), sphereCenterWorld - gelpadPosition);
+            G4VSolid *gelpadShaped = new G4IntersectionSolid("SinglePMT_Gelpad_shaped", gelpadCone, gelpadSphereCut, sphereTransform);
+
             // Subtract the (translated) PMT solid so the gel wraps the dome instead of
             // overlapping it - PMT's own frame, seen from the cone's local frame, sits at
             // pmtWorldPosition - gelpadPosition.
-            G4VSolid *gelpadFinal = new G4SubtractionSolid("SinglePMT_Gelpad", gelpadCone,
+            G4VSolid *gelpadFinal = new G4SubtractionSolid("SinglePMT_Gelpad", gelpadShaped,
                                                             managerPMT->getPMTSolid(), 0, pmtWorldPosition - gelpadPosition);
 
             G4LogicalVolume *gelpadLV = new G4LogicalVolume(gelpadFinal, m_data->getMaterial("RiAbs_Gel_Shin-Etsu"), "SinglePMT_GelpadLV");
-            new G4PVPlacement(0, gelpadPosition, gelpadLV, "SinglePMT_GelpadPhys", m_worldLogical, false, 0,
+            G4VPhysicalVolume *gelpadPhys = new G4PVPlacement(0, gelpadPosition, gelpadLV, "SinglePMT_GelpadPhys", m_worldLogical, false, 0,
                                OMSimCommandArgsTable::getInstance().get<bool>("check_overlaps"));
+
+            if (OMSimCommandArgsTable::getInstance().get<bool>("single_pmt_reflector"))
+            {
+                // A thin conical shell wrapping just the gel's tapered side wall (not the front/
+                // back faces, which must stay open for light to enter/exit) - tests whether a
+                // real reflective coating there captures more light than relying purely on the
+                // gel's own total-internal-reflection funneling at that same boundary.
+                const G4double kShellThickness = 1.0 * mm;
+                G4VSolid *reflectorSleeve = new G4Cons("SinglePMT_ReflectorSleeve",
+                                                        POM::m_gelpad_small_radius, POM::m_gelpad_small_radius + kShellThickness,
+                                                        POM::m_gelpad_large_radius, POM::m_gelpad_large_radius + kShellThickness,
+                                                        POM::m_gelpad_thickness / 2.0,
+                                                        0, 2 * CLHEP::pi);
+                G4LogicalVolume *reflectorLV = new G4LogicalVolume(reflectorSleeve, m_data->getMaterial("NoOptic_Reflector"), "SinglePMT_ReflectorLV");
+                reflectorLV->SetVisAttributes(new G4VisAttributes(G4Colour(0.7, 0.7, 0.75)));
+                G4VPhysicalVolume *reflectorPhys = new G4PVPlacement(0, gelpadPosition, reflectorLV, "SinglePMT_ReflectorPhys", m_worldLogical, false, 0,
+                                                                      OMSimCommandArgsTable::getInstance().get<bool>("check_overlaps"));
+
+                auto mirrorSurface = m_data->getOpticalSurface("Surf_PMTSideMirror");
+                new G4LogicalBorderSurface("SinglePMT_Gel_to_Reflector", gelpadPhys, reflectorPhys, mirrorSurface);
+                new G4LogicalBorderSurface("SinglePMT_Reflector_to_Gel", reflectorPhys, gelpadPhys, mirrorSurface);
+            }
         }
         break;
     }

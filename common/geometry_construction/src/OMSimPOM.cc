@@ -17,15 +17,18 @@
 #include <G4TessellatedSolid.hh>
 #include <G4LogicalVolumeStore.hh>
 #include <G4PhysicalVolumeStore.hh>
+#include <G4LogicalBorderSurface.hh>
 
-const G4double POM::m_gelThicknessFrontPMT = 2.0 * mm;
+const G4double POM::m_gelThicknessFrontPMT = 1 * mm;
 const G4double POM::m_gelpad_small_radius = 40.0 * mm;
-const G4double POM::m_gelpad_thickness = 24.0 * mm;
+const G4double POM::m_gelpad_thickness = 22.0 * mm;
 const G4double POM::m_polarPadOpeningAngle = 50.0 * deg;
 const G4double POM::m_gelpad_large_radius = POM::m_gelpad_small_radius + std::tan(POM::m_polarPadOpeningAngle) * POM::m_gelpad_thickness;
+const G4double POM::m_gelpad_sphere_radius = 201.9 * mm; // == m_glassInRad
 
 POM::POM(G4bool p_placeHarness) : OMSimOpticalModule(new OMSimPMTConstruction()), m_placeHarness(p_placeHarness),
     m_singleHemisphere(OMSimCommandArgsTable::getInstance().get<bool>("single_hemisphere")),
+    m_pomReflector(OMSimCommandArgsTable::getInstance().get<bool>("pom_reflector")),
     m_numberBuiltPMTs(m_singleHemisphere ? (m_numberPolarPMTs + m_numberEqPMTs) : m_totalNumberPMTs)
 {
     log_info("Constructing POM");
@@ -116,6 +119,8 @@ void POM::construction()
     createGelpadLogicalVolumes(innerAirSolid);
     placePMTs(innerAirLV);
     placeGelpads(innerAirLV);
+    if (m_pomReflector)
+        placeGelpadReflectors(innerAirLV, innerAirSolid);
     InternalCADComponents(innerAirLV);
 
     if (m_singleHemisphere)
@@ -757,4 +762,53 @@ void POM::placeGelpads(G4LogicalVolume *p_innerVolume)
 
         new G4PVPlacement(0, G4ThreeVector(0, 0, 0), m_gelPadLogical[k], m_converter.str(), p_innerVolume, false, 0, m_checkOverlaps);
     }
-} 
+}
+
+void POM::placeGelpadReflectors(G4LogicalVolume *p_innerVolume, G4VSolid *p_gelSolid)
+{
+    // Thin conical shell wrapping each gelpad's tapered side wall only (not the front/back
+    // faces, which must stay open for light to enter/exit) - array-level test of whether a real
+    // reflective coating there (Surf_PMTSideMirror) further enhances collection, and whether
+    // packing one around every PMT introduces inter-PMT shadowing/crosstalk that a single
+    // isolated PMT test cannot show.
+    //
+    // The raw sleeve (a plain radial offset of the gelpad's own cone) can poke past the cavity
+    // boundary: the gelpad's outer surface already touches that boundary with essentially no
+    // spare room (its far face sits exactly on the glass sphere by construction), so adding
+    // extra radius without clipping overlaps the cavity's mother volume. Intersect it against
+    // the same cavity solid (p_gelSolid) the gelpad itself is clipped against, exactly mirroring
+    // createGelpadLogicalVolumes()'s own clipping step.
+    auto mirrorSurface = m_data->getOpticalSurface("Surf_PMTSideMirror");
+    auto reflectorMat = m_data->getMaterial("NoOptic_Reflector");
+
+    for (int k = 0; k <= m_numberBuiltPMTs - 1; k++)
+    {
+        m_converter.str("");
+        m_converter << "GelpadReflector_" << k;
+
+        G4VSolid *sleeve = new G4Cons(m_converter.str() + "_cone",
+                                      m_gelpad_small_radius, m_gelpad_small_radius + m_reflectorConeSheetThickness,
+                                      m_gelpad_large_radius, m_gelpad_large_radius + m_reflectorConeSheetThickness,
+                                      m_gelpad_thickness / 2.0, 0, 2 * CLHEP::pi);
+
+        G4RotationMatrix *rot = new G4RotationMatrix();
+        rot->rotateY(m_thetaPMT[k]);
+        rot->rotateZ(m_phiPMT[k]);
+        G4Transform3D transform(*rot, G4ThreeVector(m_positionsGelpad[k]));
+
+        G4VSolid *clippedSleeve = new G4IntersectionSolid(m_converter.str(), p_gelSolid, sleeve, transform);
+
+        G4LogicalVolume *sleeveLV = new G4LogicalVolume(clippedSleeve, reflectorMat, m_converter.str() + "_log");
+        sleeveLV->SetVisAttributes(m_pom_flange);
+
+        G4VPhysicalVolume *sleevePhys = new G4PVPlacement(0, G4ThreeVector(0, 0, 0), sleeveLV, m_converter.str() + "_phys", p_innerVolume, false, 0, m_checkOverlaps);
+
+        m_converter2.str("");
+        m_converter2 << "GelPad_" << k;
+        if (auto gelpadPhys = G4PhysicalVolumeStore::GetInstance()->GetVolume(m_converter2.str()))
+        {
+            new G4LogicalBorderSurface(m_converter.str() + "_gel_to_reflector", gelpadPhys, sleevePhys, mirrorSurface);
+            new G4LogicalBorderSurface(m_converter.str() + "_reflector_to_gel", sleevePhys, gelpadPhys, mirrorSurface);
+        }
+    }
+}

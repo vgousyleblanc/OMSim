@@ -35,6 +35,9 @@ public:
     static const G4double m_gelpad_thickness;
     static const G4double m_polarPadOpeningAngle;
     static const G4double m_gelpad_large_radius;
+    // Radius of the sphere the gelpad's outer face is cut against - the real P-OM's inner glass
+    // radius (m_glassInRad), so the gelpad's exposed curvature matches the glass it touches.
+    static const G4double m_gelpad_sphere_radius;
 
 private:
     //selection variables
@@ -55,6 +58,11 @@ private:
     void createGelpadLogicalVolumes(G4VSolid* lGelSolid);
     void placePMTs(G4LogicalVolume* lInnerVolumeLogical);
     void placeGelpads(G4LogicalVolume* lInnerVolumeLogical);
+    // Wraps a thin reflective sleeve (Surf_PMTSideMirror) around every gelpad's tapered side
+    // wall, matching each PMT's own rotation/position. Only called when "pom_reflector" is set.
+    // lGelSolid (the inner cavity) clips the sleeve the same way it clips the gelpad itself,
+    // since the gelpad's outer surface already touches that cavity boundary with no spare room.
+    void placeGelpadReflectors(G4LogicalVolume* lInnerVolumeLogical, G4VSolid* lGelSolid);
 
     //vectors for positions and rotations
     std::vector<G4ThreeVector> m_positionsPMT;
@@ -89,7 +97,6 @@ private:
     const G4double m_glassOutRad = 215.9*mm; // Outer vessel radius including 12 mm glass thickness
     const G4double m_glassThick = 14.0*mm;
     const G4double m_glassInRad = 201.9*mm;   // Inner air cavity radius, 202
-    const G4double m_gelpad_sphere_radius = m_glassInRad;
     const G4int m_numberPolarPMTs = 4;
     const G4int m_numberEqPMTs = 4;
     
@@ -114,6 +121,9 @@ private:
     // flat plastic cap sealing the equator, instead of the full module - for comparison
     // against a half-module prototype measurement. Read from the "single_hemisphere" arg.
     const G4bool m_singleHemisphere;
+    // If true, wrap a reflective sleeve around every gelpad's tapered side wall. Read from the
+    // "pom_reflector" arg.
+    const G4bool m_pomReflector;
     // Number of PMTs actually built (m_totalNumberPMTs, or half of it in single-hemisphere mode).
     const G4int m_numberBuiltPMTs;
 
