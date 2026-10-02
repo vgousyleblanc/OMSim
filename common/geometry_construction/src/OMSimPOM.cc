@@ -68,13 +68,30 @@ void POM::PrintVolumeTree(G4LogicalVolume* lv, G4int depth)
 
 void POM::construction()
 {
-    // Build a real hollow shell so the optical hierarchy is:
-    // world (water) -> glass shell -> inner cavity -> gelpads/PMTs.
-    // This mirrors the intended POM geometry, with the shell split into two half-spheres
-    // and a titanium ring rather than a single air mother enclosing glass pieces.
+    // The optical hierarchy is world (water) -> glass shell -> inner cavity -> gelpads/PMTs.
+    //
+    // This used to subtract the inner cavity's own solid from the outer glass solid to build an
+    // explicit hollow shell (outerGlass MINUS innerAir), with innerAirLV then placed as a daughter
+    // of that shell. That makes the shell and the cavity share an exactly-tangent boundary
+    // everywhere (same shape, same radius, nothing in between) - a textbook G4 boolean degeneracy,
+    // and not just a harmless --check_overlaps false positive here: photon tracking confirmed a
+    // real navigation crack from it (rays crossing the glass near the dome's pole were exiting
+    // into stray World material instead of reaching InnerAirPhys, some then re-entering the cavity
+    // near the OTHER hemisphere's pole, i.e. crossing between hemispheres through this crack - not
+    // through any real optical path). Padding the subtracted copy slightly larger (tried 0.05mm and
+    // 2mm) didn't fix it either - it just turned the exact-tangent crack into a literal gap of the
+    // same width, since a GEOMETRIC VOID now existed between the (unpadded) cavity daughter's own
+    // boundary and the (padded) hole it was supposed to exactly fill.
+    //
+    // The actual fix: don't subtract the cavity from the glass at all. A solid glass sphere with
+    // the air cavity placed as a plain daughter inside it is optically identical (daughters always
+    // override their mother's material in the region they occupy, so the mother's own material -
+    // glass - automatically fills everywhere else) and has no fragile double-boolean chain to get
+    // wrong. The titanium ring still needs its own notch cut from the glass below (a real
+    // geometric necessity, not a side effect of this pattern), so glassShellSolid is still built
+    // with one subtraction, just one fewer than before.
     G4VSolid *innerAirSolid = pressureVessel(m_glassInRad, "InnerAirVoid", !m_singleHemisphere);
-    G4VSolid *outerGlassSolid = pressureVessel(m_glassOutRad, "GlassShellOuter", !m_singleHemisphere);
-    G4VSolid *glassShellSolid = new G4SubtractionSolid("GlassShellMinusCavity", outerGlassSolid, innerAirSolid, 0, G4ThreeVector());
+    G4VSolid *glassShellSolid = pressureVessel(m_glassOutRad, "GlassShellOuter", !m_singleHemisphere);
 
     // The single-hemisphere prototype has no titanium ring at all: the plastic cap is glued
     // directly onto the open end of the glass, so the titanium cylinder/cutter are only built
@@ -122,6 +139,52 @@ void POM::construction()
     if (m_pomReflector)
         placeGelpadReflectors(innerAirLV, innerAirSolid);
     InternalCADComponents(innerAirLV);
+
+    if (!m_singleHemisphere)
+    {
+        // Photon tracking showed the glass sphere + gel-filled cavity acts as a thick ball lens:
+        // parallel light entering one hemisphere's glass refracts to a focus a few hundred mm
+        // away, and for marginal rays that focus sits close enough to the module that light can
+        // cross the equator into the OTHER hemisphere's air cavity and reach its PMTs.
+        //
+        // The real module seals this with two solid plates, one per hemisphere, closing off each
+        // glass half's open base completely - not just a ring around the electronics board (an
+        // earlier, more conservative version of this only filled the open annulus around the
+        // board, which left the board's own internal gaps - mounting holes, cutouts - exposed;
+        // photon tracking confirmed light still leaked through those).
+        //
+        // An even earlier version tried to avoid colliding with the existing electronics board
+        // and PMT frames by subtracting their real CAD-mesh shapes out of each plate first. That
+        // back-fired: CAD_Frame_up/down's mesh, once correctly transformed into world coordinates
+        // (a 90+90deg rotation - easy to get backwards, and the fix still wasn't enough), turns
+        // out to have a genuinely large footprint that overlaps almost this entire disk, so the
+        // subtraction voided out nearly the whole plate - confirmed with a same-seed, same-RNG
+        // before/after photon-tracking comparison showing the "sealed" plate changed the outcome
+        // of only 1 ray out of 300, i.e. it was blocking almost nothing.
+        //
+        // The electronics board and both frames are already NoOptic_Absorber (fully opaque), so a
+        // plain full disk placed right through them is not a physics problem, only a geometry-QA
+        // one: --check_overlaps will flag the overlap, but two coincident absorbers behave exactly
+        // like one - no photon can tell the difference. Simplicity and an actual working seal win
+        // here over a "clean" geometry that seals almost nothing.
+        const G4double kPlateHalfHeight = 2.0 * mm;
+        const G4Colour kPlateColour(0.9, 0.6, 0.1, 1.0); // distinct from the dark-gray frame/board, easy to spot in the viewer
+        G4VisAttributes plateVis(kPlateColour);
+
+        for (G4int side : {+1, -1})
+        {
+            // The two plates must touch exactly at z=0 with zero gap between them - an earlier
+            // version left a 1mm gap "for realism" (sitting back-to-back, not literally touching)
+            // and that alone let the large majority of cross-hemisphere rays leak straight through
+            // the resulting 2mm-wide open-air slice spanning the full radius at the equator.
+            const G4ThreeVector plateCenter(0, 0, side * kPlateHalfHeight);
+            G4VSolid *plateSolid = new G4Tubs("EquatorPlate_raw", 0, m_glassInRad, kPlateHalfHeight, 0, 2 * CLHEP::pi);
+            G4String name = "EquatorPlate_" + std::string(side > 0 ? "up" : "down");
+            G4LogicalVolume *plateLV = new G4LogicalVolume(plateSolid, m_data->getMaterial("NoOptic_Absorber"), name + "LV");
+            plateLV->SetVisAttributes(plateVis);
+            new G4PVPlacement(nullptr, plateCenter, plateLV, name + "Phys", innerAirLV, false, 0, false);
+        }
+    }
 
     if (m_singleHemisphere)
     {
@@ -191,7 +254,17 @@ G4UnionSolid *POM::pressureVessel(const G4double pOutRad, G4String pSuffix, G4bo
 {
     G4Tubs *cylinderSolid = new G4Tubs("Cylinder solid" + pSuffix, 0, pOutRad, m_cylinderHeight, 0, 2 * CLHEP::pi);
 
-    G4Ellipsoid *topHalfSphere = new G4Ellipsoid("SphereTop solid" + pSuffix, pOutRad, pOutRad, pOutRad, 0, pOutRad);
+    // Each hemisphere's flat cut face is placed to land exactly on the cylinder's own flat end
+    // face (world z=+-m_cylinderHeight) - a textbook G4 boolean-solid degeneracy (the same one
+    // the TitaniumCutter code elsewhere in this file already works around, see its own comment):
+    // two solids of different types sharing an exactly-coincident surface confuses the CSG
+    // inside/outside classification right at that seam, opening a real navigation gap there -
+    // confirmed by photon tracking showing tracks pass straight from the glass shell into stray
+    // "World" material around this exact z value, then re-emerge somewhere else in the cavity.
+    // Padding the z-cut by kSeamPadding makes each hemisphere extend slightly INTO the cylinder's
+    // own volume instead of exactly touching it - a deliberate small overlap, not a knife-edge.
+    const G4double kSeamPadding = 0.01 * mm;
+    G4Ellipsoid *topHalfSphere = new G4Ellipsoid("SphereTop solid" + pSuffix, pOutRad, pOutRad, pOutRad, -kSeamPadding, pOutRad);
 
     // place hemispheres at the cylinder ends so they start where the cylinder ends
     G4UnionSolid *topUnion = new G4UnionSolid("temp" + pSuffix, cylinderSolid, topHalfSphere, 0, G4ThreeVector(0, 0, m_cylinderHeight));
@@ -202,7 +275,7 @@ G4UnionSolid *POM::pressureVessel(const G4double pOutRad, G4String pSuffix, G4bo
     if (!p_bothHemispheres)
         return topUnion;
 
-    G4Ellipsoid *bottomHalfSphere = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -pOutRad, 0);
+    G4Ellipsoid *bottomHalfSphere = new G4Ellipsoid("SphereBottom solid" + pSuffix, pOutRad, pOutRad, pOutRad, -pOutRad, kSeamPadding);
     G4UnionSolid *unionSolid = new G4UnionSolid("OM body" + pSuffix, topUnion, bottomHalfSphere, 0, G4ThreeVector(0, 0, -m_cylinderHeight));
     return unionSolid;
 }
