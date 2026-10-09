@@ -93,14 +93,20 @@ private:
     const G4double m_EqPMTrOffset = 2.6*mm;//2.6
     const G4double m_EqPMTzOffset = 15*mm;//62.5
 
-    const G4double m_cylinderHeight = 80.0*mm;
+    // Half-height of the pressure-vessel cylinder: 80mm for a full double-hemisphere module, half
+    // that (40mm) in single-hemisphere mode - a half-module prototype only needs enough cylinder
+    // for one hemisphere, not the full length meant to carry two. Set from m_singleHemisphere in
+    // the constructor's initializer list (via its own fresh command-args lookup, not the sibling
+    // member - member initialization order follows declaration order, and m_singleHemisphere is
+    // declared after this member).
+    const G4double m_cylinderHeight;
     const G4double m_glassOutRad = 215.9*mm; // Outer vessel radius including 12 mm glass thickness
     const G4double m_glassThick = 14.0*mm;
     const G4double m_glassInRad = 201.9*mm;   // Inner air cavity radius, 202
     const G4int m_numberPolarPMTs = 4;
     const G4int m_numberEqPMTs = 4;
     
-    const G4double m_frame_offset=12*mm;
+    const G4double m_frame_offset=20*mm;
 
     const G4double m_reflectorConeSheetThickness = 0.5*mm;
     const G4double m_reflectorConeToHolder = 1.55*mm;
