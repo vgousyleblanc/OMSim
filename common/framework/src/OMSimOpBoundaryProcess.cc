@@ -1547,20 +1547,14 @@ G4bool G4OpBoundaryProcess::InvokeSD(const G4Step *pStep)
   G4Step aStep = *pStep;
   aStep.AddTotalEnergyDeposit(fPhotonMomentum); // relevant for tracking the energy deposited by the photon in a sensitive detector
 
+  // Only the post-step volume's detector, as in stock Geant4. A photon absorbed at the photocathode
+  // from INSIDE the sensitive volume (pre-step) is already handed to that volume's detector by
+  // G4SteppingManager itself; also falling back to the pre-step detector here stored those hits
+  // (photons reflected back from the PMT internals) twice.
   G4VSensitiveDetector *sd = aStep.GetPostStepPoint()->GetSensitiveDetector();
   if (sd != nullptr)
-  {
     return sd->Hit(&aStep); // notifying the sensitive detector that a hit has occurred
-  }
-
-  else
-  {
-    sd = aStep.GetPreStepPoint()->GetSensitiveDetector();
-    if (sd != nullptr)
-      return sd->Hit(&aStep);
-    log_warning("Not found");
-    return false;
-  }
+  return false;
 }
 // The function returns true if a sensitive detector was found and the Hit method was invoked successfully. Otherwise, it returns false
 
