@@ -12,6 +12,7 @@
 #include "G4Orb.hh"
 #include <G4Ellipsoid.hh>
 #include <G4IntersectionSolid.hh>
+#include <G4UnionSolid.hh>
 #include <G4Polycone.hh>
 #include <G4EllipticalCone.hh>
 #include <G4TessellatedSolid.hh>
@@ -20,6 +21,10 @@
 #include <G4LogicalBorderSurface.hh>
 #include <fstream>
 #include <cstdlib>
+
+// Gelpad is the mother volume of its PMT (see createGelpadLogicalVolumes()); POM_GEL_SUBTRACT=1
+// reverts to the old gel-minus-PMT subtraction.
+static const bool m_gelMotherOfPMT = !std::getenv("POM_GEL_SUBTRACT");
 
 // The equatorial ring's PMTs get an extra +m_EqPMTrOffset (2.6mm) radial push (see
 // setPMTAndGelpadPositions()) that the polar ring doesn't, but the gelpad's OUTER boundary is
@@ -885,7 +890,6 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
     G4VSolid *solidPMT = m_managerPMT->getPMTSolid();
     G4IntersectionSolid *cutCone;
     G4LogicalVolume *gelPadLogical;
-    G4SubtractionSolid *cutConeFinal;
 
     // create logical volume for each gelpad
     for (int k = 0; k <= m_numberBuiltPMTs - 1; k++)
@@ -967,8 +971,26 @@ void POM::createGelpadLogicalVolumes(G4VSolid *p_gelSolid)
 
         // Apply the local profile once at the PMT position, then clip it to the inner cavity.
         cutCone = new G4IntersectionSolid(m_converter.str(), p_gelSolid, gelpadSolid, gelpadTransform);
-        cutConeFinal = new G4SubtractionSolid(m_converter.str() + "_minus_pmt", cutCone, solidPMT, transformers);
-        gelPadLogical = new G4LogicalVolume(cutConeFinal, m_data->getMaterial("argGel"), m_converter2.str());
+        // Gel as MOTHER of the PMT (default), not gel minus PMT: with the subtraction, photons
+        // crossing the gelpad's side wall at grazing angles (~74-80deg w.r.t. the PMT axis) were
+        // navigated straight from the gel into the PMT's internal vacuum volumes, skipping the
+        // PMT glass entirely - no overlap involved, a G4 navigation failure on the boolean
+        // gel-minus-PMT surface shared with the PMT. Reproduced and confirmed in the single-PMT
+        // bench rig, where it suppressed the measured gain just past the pad edge. The gel
+        // envelope now also covers the PMT (+ HA coating) and the PMT is placed inside it
+        // (placePMTs()), so the gel/PMT boundary is a plain mother/daughter boundary.
+        // POM_GEL_SUBTRACT=1 restores the old subtraction for comparison.
+        G4VSolid *gelpadFinal;
+        if (m_gelMotherOfPMT)
+        {
+            auto coating = m_managerPMT->getComponent("HACoating");
+            G4VSolid *envelope = new G4UnionSolid(m_converter.str() + "_plus_pmt", cutCone, solidPMT, transformers);
+            gelpadFinal = new G4UnionSolid(m_converter.str() + "_envelope", envelope, coating.VSolid,
+                                           transformers * G4Transform3D(coating.Rotation, coating.Position));
+        }
+        else
+            gelpadFinal = new G4SubtractionSolid(m_converter.str() + "_minus_pmt", cutCone, solidPMT, transformers);
+        gelPadLogical = new G4LogicalVolume(gelpadFinal, m_data->getMaterial("argGel"), m_converter2.str());
 
         // save logical volume of gelpads in array
         m_gelPadLogical.push_back(gelPadLogical);
@@ -989,7 +1011,10 @@ void POM::placePMTs(G4LogicalVolume *p_innerVolume)
         rot->rotateZ(m_phiPMT[k]);
         G4Transform3D transformers = G4Transform3D(*rot, G4ThreeVector(m_positionsPMT[k]));
 
-        m_managerPMT->placeIt(transformers, p_innerVolume, m_converter.str());
+        // With the gel as mother, the PMT sits inside its own gelpad (same coordinates, since
+        // the gelpad is placed at the origin of p_innerVolume) - see createGelpadLogicalVolumes().
+        G4LogicalVolume *mother = m_gelMotherOfPMT ? m_gelPadLogical[k] : p_innerVolume;
+        m_managerPMT->placeIt(transformers, mother, m_converter.str());
     }
 }
 
