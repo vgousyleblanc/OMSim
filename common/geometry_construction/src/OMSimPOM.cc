@@ -26,12 +26,11 @@
 // reverts to the old gel-minus-PMT subtraction.
 static const bool m_gelMotherOfPMT = !std::getenv("POM_GEL_SUBTRACT");
 
-// The equatorial ring's PMTs get an extra +m_EqPMTrOffset (2.6mm) radial push (see
-// setPMTAndGelpadPositions()) that the polar ring doesn't, but the gelpad's OUTER boundary is
-// capped at the glass surface regardless of ring (createGelpadLogicalVolumes()'s sphere-cut).
-// With too little margin here, the polar ring's PMT tip can sit flush with that cap while the
-// equatorial ring's tip (2.6mm further out) pokes past it, visibly outside the gel. 6mm keeps
-// both rings comfortably inside the gel (polar: ~5mm clearance, equatorial: ~2.4mm).
+// Gel thickness in front of every PMT tip. All 8 PMTs sit at the same radius: in the P-OM CAD
+// (P-OM_internal_v13) every PMT tip is the same distance below the inner glass surface.
+// m_EqPMTrOffset used to be 2.6mm, copied from the mDOM (whose equatorial PMTs really do sit further
+// out); in the P-OM it pushed the outer ring's PMTs and gelpads 2.6mm closer to the glass than the
+// polar ring's, leaving the outer PMTs with 2.6mm less front gel.
 const G4double POM::m_gelThicknessFrontPMT = 6 * mm;
 const G4double POM::m_gelpad_small_radius = 40.0 * mm; //40
 const G4double POM::m_gelpad_thickness = 22.0 * mm; //22

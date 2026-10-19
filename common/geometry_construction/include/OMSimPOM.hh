@@ -90,7 +90,7 @@ private:
 
     const G4double m_cylinder_outer_radius=229*mm;
     const G4double m_cylinderAngle = 2.5*deg;
-    const G4double m_EqPMTrOffset = 2.6*mm;//2.6
+    const G4double m_EqPMTrOffset = 0.0*mm; // all 8 P-OM PMTs sit at the same radius (CAD); the mDOM's 2.6 mm does not apply
     const G4double m_EqPMTzOffset = 15*mm;//62.5
 
     // Half-height of the pressure-vessel cylinder: 80mm for a full double-hemisphere module, half
