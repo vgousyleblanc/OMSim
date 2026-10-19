@@ -411,12 +411,16 @@ void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
     lRotation_frame_down.rotateY(-90*deg);
     G4ThreeVector lOriginInternal(0 * mm, 0 * mm, 0 * mm);
     G4ThreeVector lOriginInternal_up, lOriginInternal_down;
+    // PMTFrame.obj is the CAD part "frame 13" in its own coordinates, whose origin is the dome centre
+    // (P-OM_internal_v13 places it there). The mesh's y becomes the module z, so the upper frame's offset
+    // is the dome centre height, m_cylinderHeight. (It used to be 5 mm higher, which pushed the frame
+    // through the glass and is why it needed the clip below.)
     if (m_singleHemisphere) {
-        lOriginInternal_up = G4ThreeVector(0 * mm, 45 * mm, 0*mm); // m_cylinderHeight-m_frame_offset);
+        lOriginInternal_up = G4ThreeVector(0 * mm, m_cylinderHeight, 0*mm);
         lOriginInternal_down = G4ThreeVector(0 * mm, 45 * mm, 0*mm); // -(m_cylinderHeight-m_frame_offset));
     }
     else {
-        lOriginInternal_up = G4ThreeVector(0 * mm,m_cylinderHeight+45 * mm,0 *mm);
+        lOriginInternal_up = G4ThreeVector(0 * mm, m_cylinderHeight, 0 *mm);
         lOriginInternal_down = G4ThreeVector(0 * mm, -m_cylinderHeight-45 * mm,0*mm);
     }
     //Support structure
@@ -435,11 +439,9 @@ void POM::InternalCADComponents(G4LogicalVolume *p_innerVolume)
     //Tools::AppendCADComponent(this, 10.0, lOriginInternal, lRotation_flange_up, "POM/p-om_flange_frame.obj", "CAD_glass_flange",m_data->getMaterial("Titanium"),m_pom_flange);
     {
     auto comp = getComponent("CAD_Frame_up");
-    // The raw CAD mesh pokes ~3mm past the cavity's curved (glass) boundary at its outer edge -
-    // a real daughter-exceeds-mother overlap (confirmed via --check_overlaps), not just a
-    // cosmetic coincident-surface case like the equator plates. Clip it to the dome's true inner
-    // sphere (same center/radius the gelpad's own sphere-cut uses) so it can never exceed
-    // InnerAirLV's own curved boundary, regardless of mesh/placement details.
+    // At the CAD position the frame reaches 201.0 mm from the dome centre, just inside the glass
+    // (201.9 mm). Clip it to the dome's inner sphere anyway (same center/radius the gelpad's own
+    // sphere-cut uses) so it can never exceed InnerAirLV's curved boundary, whatever the placement.
     G4ThreeVector sphereCenterInFrameLocal = lRotation_frame_up.inverse() * G4ThreeVector(0, 0, m_cylinderHeight);
     G4VSolid *frameClipSphere = new G4Sphere("CAD_Frame_up_clip_sphere", 0, m_glassInRad, 0, 2 * CLHEP::pi, 0, CLHEP::pi);
     G4VSolid *frameClippedSolid = new G4IntersectionSolid("CAD_Frame_up_clipped", comp.VSolid, frameClipSphere,
