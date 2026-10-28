@@ -1718,8 +1718,19 @@ void G4OpBoundaryProcess::PhotocathodeCoatedComplex(const G4Track *pTrack)
 
     G4double lCostTL = lCost1 > 0.0 ? std::sqrt(1. - lSintTL * lSintTL) : -std::sqrt(1. - lSintTL * lSintTL);
 
-    lCostTLComplex = lCost1 > 0.0 ? std::sqrt(G4complex(1.0, 0.0) - lSintTLComplex * lSintTLComplex) : -std::sqrt(G4complex(1.0, 0.0) - lSintTLComplex * lSintTLComplex);
-    lCost2Complex = lCost1 > 0.0 ? std::sqrt(G4complex(1.0, 0.0) - lSint2Complex * lSint2Complex) : -std::sqrt(G4complex(1.0, 0.0) - lSint2Complex * lSint2Complex);
+    // The principal square root picks the wrong branch beyond the critical angle: the tiny spurious imaginary part that
+    // sin(theta2) carries from going through the complex film index flips the evanescent wave behind the photocathode into a
+    // growing one, giving the wrong absorption for every photon above ~42 deg. Physical root: evanescent -> Im > 0,
+    // propagating -> Re > 0, then the sign of the incoming direction.
+    auto physicalRoot = [](G4complex c)
+    {
+      if (std::abs(std::real(c)) < std::abs(std::imag(c)))
+        return std::imag(c) < 0 ? -c : c;
+      return std::real(c) < 0 ? -c : c;
+    };
+    const G4double lDirection = lCost1 > 0.0 ? 1.0 : -1.0;
+    lCostTLComplex = lDirection * physicalRoot(std::sqrt(G4complex(1.0, 0.0) - lSintTLComplex * lSintTLComplex));
+    lCost2Complex = lDirection * physicalRoot(std::sqrt(G4complex(1.0, 0.0) - lSint2Complex * lSint2Complex));
 
     lCost1Complex = G4complex(lCost1, 0);
 
