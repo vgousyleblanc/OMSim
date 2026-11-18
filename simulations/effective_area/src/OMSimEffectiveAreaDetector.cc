@@ -1,5 +1,6 @@
 #include "OMSimEffectiveAreaDetector.hh"
 #include "OMSimPDOM.hh"
+#include "OMSimPOM_4inch.hh"
 #include "OMSimPOM.hh"
 #include "OMSimLOM16.hh"
 #include "OMSimLOM18.hh"
@@ -180,6 +181,11 @@ void OMSimEffectiveAreaDetector::constructDetector()
     case 8:
     {
         opticalModule = new POM(placeHarness);
+        break;
+    }
+    case 9:
+    {
+        opticalModule = new POM_4inch(placeHarness);
         break;
     }
     }
